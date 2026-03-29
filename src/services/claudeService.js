@@ -1,0 +1,221 @@
+import Anthropic from '@anthropic-ai/sdk';
+import { env } from '../config/env.js';
+
+const client = new Anthropic({ apiKey: env.CLAUDE_API_KEY });
+
+const MODEL = 'claude-sonnet-4-20250514';
+const MAX_TOKENS = 600;
+
+// Timeout de 25 segundos para a chamada à API do Claude
+const API_TIMEOUT_MS = 25_000;
+
+/**
+ * Extrai o bloco JSON de controle das tags <json>...</json> na resposta do Claude.
+ * Retorna null se não encontrar ou se o JSON for inválido.
+ * @param {string} text
+ * @returns {object|null}
+ */
+function extractControlJson(text) {
+  const match = text.match(/<json>([\s\S]*?)<\/json>/i);
+  if (!match) return null;
+
+  try {
+    return JSON.parse(match[1].trim());
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Remove as tags <json>...</json> e seu conteúdo do texto para obter
+ * apenas a mensagem visível ao paciente.
+ * @param {string} text
+ * @returns {string}
+ */
+function extractPatientMessage(text) {
+  return text.replace(/<json>[\s\S]*?<\/json>/gi, '').trim();
+}
+
+/**
+ * Monta o system prompt completo para o Claude, com:
+ * - Identidade do bot e dados da clínica
+ * - Regras de comportamento
+ * - Lista de profissionais e especialidades
+ * - Horários disponíveis formatados
+ * - Estado atual da conversa e contexto acumulado
+ * - Instrução para retornar JSON de controle nas tags <json></json>
+ *
+ * @param {object} clinica - Registro da tabela clinicas
+ * @param {Array} profissionais - Profissionais ativos da clínica
+ * @param {Array} horariosDisponiveis - Resultado de generateMockSlots ou Google Calendar
+ * @param {object} estadoConversa - Registro atual de estado_conversa (pode ser null)
+ * @returns {string}
+ */
+export function buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoConversa) {
+  // Formata a lista de profissionais e especialidades
+  const listaProfissionais = profissionais
+    .map((p, i) => `  ${i + 1}. ${p.nome} — ${p.especialidade} (consulta de ${p.duracaoConsultaMin} min)`)
+    .join('\n');
+
+  // Formata os horários disponíveis por profissional
+  const listaHorarios = horariosDisponiveis
+    .map(({ profissional, slots }) => {
+      if (!slots || slots.length === 0) return `  ${profissional.nome}: sem horários disponíveis`;
+      const diasFormatados = slots
+        .map((d) => `    ${d.dia_semana} ${d.data}: ${d.slots.join(', ')}`)
+        .join('\n');
+      return `  ${profissional.nome} (${profissional.especialidade}):\n${diasFormatados}`;
+    })
+    .join('\n\n');
+
+  // Estado atual e contexto acumulado da conversa
+  const estadoAtual = estadoConversa?.estado ?? 'inicio';
+  const contexto = estadoConversa?.contextoJson ?? {};
+  const contextoFormatado = JSON.stringify(contexto, null, 2);
+
+  return `Você é o assistente virtual da ${clinica.nome}, uma clínica localizada em ${clinica.endereco ?? 'endereço não informado'}.
+Seu papel é ajudar pacientes a agendar consultas pelo WhatsApp de forma cordial, objetiva e eficiente.
+
+## REGRAS DE COMPORTAMENTO
+- Seja sempre cordial e objetivo. Use no máximo 2 emojis por mensagem.
+- Escreva em português brasileiro.
+- NUNCA invente horários ou profissionais — use APENAS os dados fornecidos abaixo.
+- NUNCA dê conselhos médicos ou diagnósticos.
+- Se o paciente pedir algo fora do escopo (agendamento, informações da clínica), responda educadamente que não pode ajudar com isso e redirecione para agendamento.
+- Se a mensagem for muito vaga ou você tiver baixa confiança na interpretação, peça esclarecimento de forma amigável.
+- Após 3 tentativas sem entender o paciente, sugira que ele ligue para a recepção.
+- Quando confirmar um agendamento, sempre repita: profissional, especialidade, data e horário.
+
+## PROFISSIONAIS E ESPECIALIDADES DISPONÍVEIS
+${listaProfissionais || '  (nenhum profissional cadastrado)'}
+
+## HORÁRIOS DISPONÍVEIS
+${listaHorarios || '  (sem horários disponíveis no momento)'}
+
+## ESTADO ATUAL DA CONVERSA
+Estado: ${estadoAtual}
+Contexto acumulado:
+${contextoFormatado}
+
+## FLUXO ESPERADO
+inicio → escolhendo_especialidade → escolhendo_horario → confirmando → concluido → volta para inicio
+
+## INSTRUÇÃO OBRIGATÓRIA
+Ao final de CADA resposta, inclua um bloco JSON de controle dentro das tags <json></json>.
+Este JSON NÃO será exibido ao paciente — é apenas para controle interno do sistema.
+
+O JSON deve seguir exatamente este formato:
+<json>
+{
+  "intencao": "agendar|remarcar|cancelar|duvida|saudacao|outro",
+  "novo_estado": "inicio|escolhendo_especialidade|escolhendo_horario|confirmando|concluido",
+  "dados_extraidos": {
+    "especialidade": "string ou null",
+    "profissional_id": "UUID do profissional ou null",
+    "data_hora": "ISO string (ex: 2026-03-30T09:00:00-03:00) ou null",
+    "nome_paciente": "string ou null"
+  },
+  "acao": "nenhuma|criar_agendamento|cancelar_agendamento",
+  "confianca": 0.0
+}
+</json>
+
+Regras para o JSON:
+- "acao" deve ser "criar_agendamento" APENAS quando o paciente confirmou explicitamente E todos os campos dados_extraidos estão preenchidos.
+- "confianca" é um número entre 0.0 e 1.0 indicando sua certeza sobre a interpretação da mensagem.
+- Preserve os dados já extraídos em turnos anteriores (disponíveis no contexto acumulado acima).
+- Se o paciente escolher por número ou abreviação, resolva para o nome/id correto.`;
+}
+
+/**
+ * Chama a Claude API para processar uma mensagem do paciente e gerar uma resposta.
+ *
+ * @param {string} messageText - Mensagem atual do paciente
+ * @param {string} systemPrompt - System prompt completo montado por buildSystemPrompt()
+ * @param {Array} recentHistory - Últimas mensagens da tabela conversas (máx 10)
+ * @param {string} estadoAtual - Estado atual da conversa (para fallback do JSON de controle)
+ * @returns {{ mensagemParaPaciente: string, controle: object }}
+ */
+export async function processMessage(messageText, systemPrompt, recentHistory, estadoAtual = 'inicio') {
+  // Monta o array de messages com o histórico recente
+  const messages = [];
+
+  for (const msg of recentHistory) {
+    const role = msg.direcao === 'entrada' ? 'user' : 'assistant';
+    // Evita duplicar a mensagem atual que já será adicionada abaixo
+    if (msg.mensagem !== messageText || role !== 'user') {
+      messages.push({ role, content: msg.mensagem });
+    }
+  }
+
+  // Garante que a mensagem atual do paciente seja sempre a última
+  messages.push({ role: 'user', content: messageText });
+
+  // Fallback padrão caso a API falhe ou o JSON de controle não seja parseável
+  const controleFallback = {
+    intencao: 'outro',
+    novo_estado: estadoAtual,
+    dados_extraidos: {
+      especialidade: null,
+      profissional_id: null,
+      data_hora: null,
+      nome_paciente: null,
+    },
+    acao: 'nenhuma',
+    confianca: 0.0,
+  };
+
+  try {
+    // Chama a API com timeout explícito via AbortController
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+
+    let response;
+    try {
+      response = await client.messages.create(
+        {
+          model: MODEL,
+          max_tokens: MAX_TOKENS,
+          system: systemPrompt,
+          messages,
+        },
+        { signal: controller.signal }
+      );
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    const fullText = response.content?.[0]?.text ?? '';
+
+    const mensagemParaPaciente = extractPatientMessage(fullText);
+    const controle = extractControlJson(fullText) ?? controleFallback;
+
+    // Garante que campos obrigatórios existam mesmo que o Claude não os retorne
+    if (!controle.dados_extraidos) controle.dados_extraidos = controleFallback.dados_extraidos;
+    if (controle.confianca === undefined) controle.confianca = 0.5;
+
+    return { mensagemParaPaciente, controle };
+
+  } catch (err) {
+    // Rate limit (429), timeout, erro de servidor (5xx) ou qualquer outra falha
+    const isTimeout = err.name === 'AbortError';
+    const isRateLimit = err.status === 429;
+    const isServerError = err.status >= 500;
+
+    if (isTimeout) {
+      console.error('Claude API: timeout após 25s');
+    } else if (isRateLimit) {
+      console.error('Claude API: rate limit atingido');
+    } else if (isServerError) {
+      console.error(`Claude API: erro de servidor ${err.status}`);
+    } else {
+      console.error('Claude API: erro inesperado —', err.message);
+    }
+
+    return {
+      mensagemParaPaciente:
+        'Desculpe, estou com uma instabilidade momentânea. Por favor, tente novamente em alguns instantes. 🙏',
+      controle: controleFallback,
+    };
+  }
+}

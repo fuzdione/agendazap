@@ -21,6 +21,19 @@ O paciente conversa com um bot inteligente no WhatsApp que agenda consultas sem 
 
 ---
 
+## O que foi implementado — Etapa 3
+
+- **`src/services/claudeService.js`** — integração com Claude API:
+  - `buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoConversa)` — monta o system prompt completo com identidade do bot, regras, profissionais, horários disponíveis e estado atual
+  - `processMessage(messageText, systemPrompt, recentHistory, estadoAtual)` — chama `claude-sonnet-4-20250514` com histórico das últimas 10 mensagens; extrai mensagem ao paciente e JSON de controle das tags `<json></json>`; trata timeout (25s), rate limit (429) e erros de servidor com mensagem de fallback amigável
+- **`src/services/conversationService.js`** — orquestrador central:
+  - `handleIncomingMessage(clinicaId, telefone, mensagemTexto, clinica)` — busca/cria paciente e estado da conversa, monta contexto, chama Claude, processa JSON de controle, atualiza estado, cria agendamento quando confirmado e adiciona contato humano em respostas de baixa confiança (< 0.6)
+- **`src/utils/mockSlots.js`** — gerador de horários fictícios:
+  - `generateMockSlots(profissionalId, duracaoMin, diasUteis)` — gera slots para os próximos N dias úteis (seg–sex, 08:00–18:00) com 30–40% dos slots removidos aleatoriamente para simular agenda parcialmente ocupada
+- **`src/webhooks/whatsapp.js`** (atualizado) — conectado ao `conversationService`, com fallback de erro exibindo telefone da clínica
+
+---
+
 ## O que foi implementado — Etapa 2
 
 - **`src/services/whatsappService.js`** — integração com Evolution API:
@@ -149,6 +162,35 @@ Abra o WhatsApp no celular do número cadastrado na clínica → Menu → Aparel
 ```bash
 curl http://localhost:3000/admin/instance/ID_DA_CLINICA/status
 # Esperado: { "state": "open" }
+```
+
+---
+
+## Testando o bot (Etapa 3)
+
+Com o WhatsApp conectado e o servidor rodando, envie mensagens para o número da clínica e observe o fluxo completo:
+
+| Mensagem | Comportamento esperado |
+|---|---|
+| `oi` | Saudação + lista de especialidades disponíveis |
+| `dermatologia` (ou `2`, nome do profissional) | Bot mostra horários disponíveis nos próximos 5 dias úteis |
+| `segunda às 09:00` | Bot pede confirmação com nome do paciente |
+| `sim, João da Silva` | Bot confirma o agendamento e cria registro no banco |
+| `aceita convênio?` | Resposta educada fora do escopo + redirecionamento |
+
+**Verificar agendamento no banco:**
+```bash
+docker exec -it agendazap-postgres-1 psql -U agendazap -d agendazap -c "SELECT * FROM agendamentos;"
+```
+
+**Verificar histórico de mensagens:**
+```bash
+docker exec -it agendazap-postgres-1 psql -U agendazap -d agendazap -c "SELECT direcao, mensagem, created_at FROM conversas ORDER BY created_at;"
+```
+
+**Verificar estado da conversa:**
+```bash
+docker exec -it agendazap-postgres-1 psql -U agendazap -d agendazap -c "SELECT telefone, estado, contexto_json FROM estado_conversa;"
 ```
 
 ---

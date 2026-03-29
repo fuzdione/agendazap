@@ -1,5 +1,6 @@
 import { prisma } from '../config/database.js';
 import { sendTextMessage } from '../services/whatsappService.js';
+import { handleIncomingMessage } from '../services/conversationService.js';
 import { formatFromWhatsApp } from '../utils/phoneHelper.js';
 
 /**
@@ -82,7 +83,7 @@ export async function whatsappWebhookRoutes(fastify) {
         return reply.status(200).send({ received: true });
       }
 
-      // Busca ou cria o paciente
+      // Busca ou cria o paciente para poder salvar a mensagem de entrada
       let paciente = await prisma.paciente.findUnique({
         where: {
           clinicaId_telefone: {
@@ -101,7 +102,7 @@ export async function whatsappWebhookRoutes(fastify) {
         });
       }
 
-      // Salva a mensagem recebida (entrada)
+      // Salva a mensagem recebida (entrada) antes de processar
       await prisma.conversa.create({
         data: {
           clinicaId: clinica.id,
@@ -112,16 +113,30 @@ export async function whatsappWebhookRoutes(fastify) {
         },
       });
 
-      // Placeholder: resposta fixa até a IA ser integrada na Etapa 3
-      const resposta = `Olá! Sou o assistente da ${clinica.nome}. Em breve poderei te ajudar a agendar consultas! 😊`;
+      // Chama o orquestrador de conversa com IA
+      let resposta;
+      try {
+        resposta = await handleIncomingMessage(clinica.id, telefoneRemetente, textoMensagem, clinica);
+      } catch (iaErr) {
+        request.log.error({ msg: 'Erro no processamento pela IA', error: iaErr.message });
+        const telefoneClinica = clinica.telefone ?? '';
+        resposta = telefoneClinica
+          ? `Desculpe, tive um probleminha técnico. Pode repetir sua mensagem? Se preferir, ligue para ${telefoneClinica}.`
+          : 'Desculpe, tive um probleminha técnico. Pode repetir sua mensagem? 🙏';
+      }
 
       await sendTextMessage(instanceName, remoteJid, resposta);
+
+      // Recarrega o paciente — conversationService pode ter atualizado o nome
+      const pacienteAtualizado = await prisma.paciente.findUnique({
+        where: { clinicaId_telefone: { clinicaId: clinica.id, telefone: telefoneRemetente } },
+      });
 
       // Salva a mensagem enviada (saída)
       await prisma.conversa.create({
         data: {
           clinicaId: clinica.id,
-          pacienteId: paciente.id,
+          pacienteId: (pacienteAtualizado ?? paciente).id,
           telefone: telefoneRemetente,
           direcao: 'saida',
           mensagem: resposta,
