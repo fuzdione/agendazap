@@ -21,6 +21,32 @@ O paciente conversa com um bot inteligente no WhatsApp que agenda consultas sem 
 
 ---
 
+## O que foi implementado — Etapa 2
+
+- **`src/services/whatsappService.js`** — integração com Evolution API:
+  - `createInstance(instanceName, webhookUrl)` — cria instância e configura webhook
+  - `getQRCode(instanceName)` — retorna QR code para conectar o celular da clínica
+  - `sendTextMessage(instanceName, phone, text)` — envia mensagem com retry automático (2 tentativas)
+  - `getInstanceStatus(instanceName)` — retorna estado da conexão (`open`, `close`, `connecting`)
+- **`src/webhooks/whatsapp.js`** — rota `POST /webhook/whatsapp` que:
+  - Ignora mensagens `fromMe`, de grupos (`@g.us`), status/broadcast e mídias
+  - Identifica a clínica pelo nome da instância (telefone da clínica)
+  - Busca ou cria o paciente automaticamente
+  - Salva mensagens recebidas e enviadas na tabela `conversas`
+  - Responde com mensagem placeholder (IA integrada na Etapa 3)
+  - Retorna sempre `200` para a Evolution API não reenviar eventos
+- **`src/routes/admin/instance.js`** — rotas administrativas:
+  - `POST /admin/instance/create` — cria instância para uma clínica
+  - `GET /admin/instance/:clinicaId/qrcode` — retorna QR escaneável
+  - `GET /admin/instance/:clinicaId/status` — retorna estado da conexão
+- **`src/utils/phoneHelper.js`** — helpers de telefone:
+  - `formatToWhatsApp`, `formatFromWhatsApp`, `extractDDD`, `isValidBRPhone`
+
+> **Fix importante:** Evolution API v2.1.1 usa Baileys com versão desatualizada do protocolo WhatsApp.
+> A variável `CONFIG_SESSION_PHONE_VERSION=2.3000.1035194821` no docker-compose corrige a compatibilidade.
+
+---
+
 ## O que foi implementado — Etapa 1
 
 - **Estrutura completa de pastas** do projeto
@@ -93,6 +119,37 @@ npm run dev
 ```
 
 O servidor sobe em `http://localhost:3000`.
+
+---
+
+## Conectando o WhatsApp (Etapa 2)
+
+### 1. Criar a instância da clínica
+
+```bash
+curl -X POST http://localhost:3000/admin/instance/create \
+  -H "Content-Type: application/json" \
+  -d '{"clinicaId": "ID_DA_CLINICA"}'
+```
+
+### 2. Obter o QR code
+
+```bash
+curl http://localhost:3000/admin/instance/ID_DA_CLINICA/qrcode
+```
+
+O campo `code` na resposta é o conteúdo do QR code. Cole-o em qualquer gerador de QR online (ex: `qr-code-generator.com`) ou acesse o Manager em `http://localhost:8080/manager`.
+
+### 3. Escanear com o celular
+
+Abra o WhatsApp no celular do número cadastrado na clínica → Menu → Aparelhos conectados → Conectar aparelho → escaneie o QR.
+
+### 4. Verificar status
+
+```bash
+curl http://localhost:3000/admin/instance/ID_DA_CLINICA/status
+# Esperado: { "state": "open" }
+```
 
 ---
 

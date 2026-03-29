@@ -4,6 +4,8 @@ import jwt from '@fastify/jwt';
 import { env } from './config/env.js';
 import { prisma, connectDatabase, disconnectDatabase } from './config/database.js';
 import { redis, checkRedisConnection } from './config/redis.js';
+import { whatsappWebhookRoutes } from './webhooks/whatsapp.js';
+import { instanceRoutes } from './routes/admin/instance.js';
 
 const server = Fastify({
   logger: {
@@ -51,6 +53,10 @@ server.get('/health', async (request, reply) => {
     services: checks,
   });
 });
+
+// Rotas
+await server.register(whatsappWebhookRoutes);
+await server.register(instanceRoutes);
 
 // Graceful shutdown
 async function shutdown() {
