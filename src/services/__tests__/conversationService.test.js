@@ -19,10 +19,15 @@ vi.mock('../../config/database.js', () => ({
       findMany: vi.fn(),
     },
     profissional: {
-      findMany: vi.fn(),
+      findMany:   vi.fn(),
+      findUnique: vi.fn(), // usado pelo calendarService via conversationService
+    },
+    clinica: {
+      findUnique: vi.fn(), // usado pelo calendarService para configJson
     },
     agendamento: {
       create: vi.fn(),
+      update: vi.fn(), // usado para salvar calendarEventId após createEvent
     },
   },
 }));
@@ -32,10 +37,12 @@ vi.mock('../claudeService.js', () => ({
   processMessage: vi.fn(),
 }));
 
-vi.mock('../../utils/mockSlots.js', () => ({
-  generateMockSlots: vi.fn().mockReturnValue([
+vi.mock('../calendarService.js', () => ({
+  getAvailableSlots: vi.fn().mockResolvedValue([
     { dia_semana: 'Segunda', data: '30/03', slots: ['08:00', '09:00'] },
   ]),
+  createEvent:   vi.fn().mockResolvedValue('calendar-event-mock-id'),
+  checkConflict: vi.fn().mockResolvedValue(false),
 }));
 
 import { prisma } from '../../config/database.js';
@@ -101,6 +108,7 @@ function setupPrismaMocks({ estadoAtual = 'inicio', contextoJson = {} } = {}) {
   prisma.conversa.findMany.mockResolvedValue([]);
   prisma.profissional.findMany.mockResolvedValue([PROFISSIONAL]);
   prisma.agendamento.create.mockResolvedValue({ id: 'agendamento-uuid-001' });
+  prisma.agendamento.update.mockResolvedValue({});
 }
 
 // =====================================================================
