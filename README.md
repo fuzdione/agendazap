@@ -33,6 +33,10 @@ O paciente conversa com um bot inteligente no WhatsApp que agenda consultas sem 
   - `generateMockSlots(profissionalId, duracaoMin, diasUteis)` — gera slots para os próximos N dias úteis (seg–sex, 08:00–18:00) com 30–40% dos slots removidos aleatoriamente para simular agenda parcialmente ocupada
 - **`src/webhooks/whatsapp.js`** (atualizado) — conectado ao `conversationService`, com fallback de erro exibindo telefone da clínica; processa JIDs `@lid` (protocolo novo do WhatsApp — nem sempre vem duplicado com `@s.whatsapp.net`)
 - **`src/server.js`** (atualizado) — `bodyLimit: 10485760` (10MB) para suportar payloads grandes da Evolution API (mensagens com mídia codificada em base64 causavam HTTP 413)
+- **Testes automatizados** (55 testes, Vitest):
+  - `src/services/__tests__/claudeService.test.js` — parsing JSON de controle, fallbacks de erro, `buildSystemPrompt`
+  - `src/services/__tests__/conversationService.test.js` — todas as transições de estado da máquina de estados
+  - `src/webhooks/__tests__/whatsapp.test.js` (atualizado) — filtros do webhook, mock de `conversationService`
 
 ---
 
@@ -244,6 +248,8 @@ Acesse `http://localhost:8080` — deve retornar a mensagem de boas-vindas da AP
 |---|---|
 | `npm run dev` | Inicia em modo desenvolvimento com hot-reload (nodemon) |
 | `npm start` | Inicia em modo produção |
+| `npm test` | Roda todos os testes automatizados uma vez (Vitest) |
+| `npm run test:watch` | Roda testes em modo watch (re-executa ao salvar) |
 | `npm run db:generate` | Gera o Prisma Client |
 | `npm run db:push` | Sincroniza o schema com o banco (sem migration) |
 | `npm run db:migrate` | Cria e aplica uma migration nomeada |

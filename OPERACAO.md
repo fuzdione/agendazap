@@ -134,7 +134,28 @@ docker compose stop
 
 ---
 
-### 2.3 Iniciar o servidor do bot
+### 2.3 Rodar os testes automatizados
+
+```powershell
+cd C:\agendaZap\agendazap
+npm test
+```
+
+**O que faz:** Executa os 55 testes com Vitest (sem subir servidor, sem acessar banco ou APIs externas — tudo mockado).
+**Resultado esperado:**
+```
+ Test Files  4 passed (4)
+      Tests  55 passed (55)
+```
+
+**Modo watch** (re-executa ao salvar um arquivo):
+```powershell
+npm run test:watch
+```
+
+---
+
+### 2.5 Iniciar o servidor do bot
 
 ```powershell
 cd C:\agendaZap\agendazap
@@ -146,7 +167,7 @@ npm run dev
 
 ---
 
-### 2.4 Parar o servidor do bot
+### 2.6 Parar o servidor do bot
 
 ```powershell
 taskkill /IM node.exe /F
@@ -163,7 +184,7 @@ taskkill /IM node.exe /F
 
 ---
 
-### 2.5 Reiniciar o servidor do bot
+### 2.7 Reiniciar o servidor do bot
 
 ```powershell
 taskkill /IM node.exe /F; cd C:\agendaZap\agendazap; npm run dev
@@ -173,7 +194,7 @@ taskkill /IM node.exe /F; cd C:\agendaZap\agendazap; npm run dev
 
 ---
 
-### 2.6 Verificar se está tudo rodando (health check)
+### 2.8 Verificar se está tudo rodando (health check)
 
 ```powershell
 curl http://localhost:3000/health
@@ -188,7 +209,7 @@ Se `"status": "degraded"`, algum serviço está fora. Verifique com `docker ps`.
 
 ---
 
-### 2.7 Ver logs do servidor em tempo real
+### 2.9 Ver logs do servidor em tempo real
 
 O servidor exibe logs diretamente no terminal onde `npm run dev` está rodando.
 
@@ -200,7 +221,7 @@ npm run dev 2>&1 | Select-String "ERROR"
 
 ---
 
-### 2.8 Ver logs da Evolution API
+### 2.10 Ver logs da Evolution API
 
 ```powershell
 docker logs agendazap-evolution --tail 50
@@ -588,6 +609,7 @@ Resultado esperado: `{"status":"ok",...}`
 
 | Ação | Comando |
 |---|---|
+| Rodar testes | `npm test` |
 | Subir tudo | `docker compose start && npm run dev` |
 | Parar bot (celular normal) | `taskkill /IM node.exe /F` |
 | Parar tudo | `taskkill /IM node.exe /F && docker compose stop` |
