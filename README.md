@@ -21,6 +21,90 @@ O paciente conversa com um bot inteligente no WhatsApp que agenda consultas sem 
 
 ---
 
+## O que foi implementado — Etapa 4
+
+- **`src/config/google.js`** — cliente OAuth2 do Google:
+  - `getAuthUrl(clinicaId)` — gera URL de consentimento com `access_type: offline` e `prompt: consent` para garantir retorno do `refresh_token`
+  - `handleCallback(code, clinicaId)` — troca o code pelo par de tokens e persiste o `refresh_token` no banco
+  - `getAuthenticatedClient(clinicaId)` — retorna cliente OAuth2 com credenciais válidas (auto-renova o `access_token` a partir do `refresh_token` salvo)
+- **`src/services/calendarService.js`** — integração Google Calendar:
+  - `listCalendars(clinicaId)` — lista todos os calendários da conta conectada
+  - `getAvailableSlots(clinicaId, profissionalId, dataInicio, dataFim)` — consulta `freebusy.query`, cruza com horário de funcionamento (configJson), respeita duração da consulta, intervalo entre slots e antecedência mínima de 2h; fallback automático para mock se Calendar inacessível
+  - `createEvent(clinicaId, profissionalId, agendamento)` — cria evento com summary, description e timezone `America/Sao_Paulo`; retorna o `calendar_event_id`
+  - `deleteEvent(clinicaId, profissionalId, calendarEventId)` — remove evento (cancelamentos)
+  - `checkConflict(clinicaId, profissionalId, dataHora, duracaoMin)` — verifica via `freebusy` se o horário ainda está livre imediatamente antes de confirmar (evita race condition)
+- **`src/routes/admin/googleAuth.js`** — fluxo OAuth:
+  - `GET /admin/google/auth/:clinicaId` → redireciona para consentimento Google
+  - `GET /admin/google/callback` → troca code por tokens, salva, redireciona para o painel
+  - `GET /admin/google/status/:clinicaId` → retorna `{ conectado: true/false }`
+- **`src/routes/admin/professionals.js`** — gerenciamento de profissionais:
+  - `GET /admin/calendars/:clinicaId` → lista calendários disponíveis na conta conectada
+  - `PUT /admin/profissionais/:profissionalId/calendar` → vincula um `calendarId` ao profissional
+- **`src/services/conversationService.js`** (atualizado):
+  - Substituído `generateMockSlots` por `calendarService.getAvailableSlots` (com fallback automático para mock)
+  - Antes de criar o agendamento: chama `checkConflict` — se houver conflito, avisa o paciente e volta ao estado `escolhendo_horario`
+  - Após criar o registro no banco: chama `createEvent` e persiste o `calendar_event_id` no agendamento
+- **`prisma/schema.prisma`** (atualizado): coluna `google_refresh_token` adicionada ao model `Clinica`
+
+---
+
+## Como conectar o Google Calendar (Etapa 4)
+
+### 1. Criar credenciais no Google Cloud Console
+
+1. Acesse [console.cloud.google.com](https://console.cloud.google.com)
+2. Crie um projeto (ou use um existente)
+3. Ative a **Google Calendar API**
+4. Em **Credenciais → Criar credenciais → ID do cliente OAuth 2.0**:
+   - Tipo: **Aplicativo da Web**
+   - URI de redirecionamento autorizado: `http://localhost:3000/admin/google/callback`
+5. Copie o **Client ID** e o **Client Secret** para o `.env`
+
+### 2. Atualizar o banco após adicionar a coluna
+
+```bash
+npm run db:push
+```
+
+### 3. Autorizar uma clínica (obter o ID da clínica via seed ou banco)
+
+Abra no navegador:
+```
+http://localhost:3000/admin/google/auth/<CLINICA_ID>
+```
+
+Faça login com a conta Google que tem os calendários dos profissionais e clique em **Permitir**.
+
+### 4. Verificar que a autorização foi salva
+
+```bash
+curl http://localhost:3000/admin/google/status/<CLINICA_ID>
+# Esperado: { "success": true, "data": { "conectado": true } }
+```
+
+### 5. Listar calendários disponíveis
+
+```bash
+curl http://localhost:3000/admin/calendars/<CLINICA_ID>
+```
+
+### 6. Vincular um calendar a um profissional
+
+```bash
+curl -X PUT http://localhost:3000/admin/profissionais/<PROFISSIONAL_ID>/calendar \
+  -H "Content-Type: application/json" \
+  -d '{"calendarId": "email@gmail.com"}'
+```
+
+### 7. Testar o fluxo completo
+
+Envie mensagens pelo WhatsApp como de costume. O bot agora exibe horários reais do Google Calendar. Ao confirmar o agendamento:
+- Um evento é criado no Google Calendar do profissional
+- Se um horário for marcado diretamente no Google Calendar, ele não aparecerá mais como disponível no bot
+- Se dois pacientes tentarem o mesmo horário simultaneamente, o segundo recebe aviso e é direcionado a escolher outro
+
+---
+
 ## O que foi implementado — Etapa 3
 
 - **`src/services/claudeService.js`** — integração com Claude API:
@@ -235,7 +319,8 @@ Acesse `http://localhost:8080` — deve retornar a mensagem de boas-vindas da AP
 | `CLAUDE_API_KEY` | Chave da Anthropic (Claude API) | `sk-ant-...` |
 | `GOOGLE_CLIENT_ID` | Client ID do Google Cloud Console | `xxx.apps.googleusercontent.com` |
 | `GOOGLE_CLIENT_SECRET` | Client Secret do Google | `GOCSPX-...` |
-| `GOOGLE_REDIRECT_URI` | URI de callback OAuth do Google | `http://localhost:3000/auth/google/callback` |
+| `GOOGLE_REDIRECT_URI` | URI de callback OAuth do Google | `http://localhost:3000/admin/google/callback` |
+| `ADMIN_URL` | URL base do painel admin (redirecionamento pós-OAuth) | `http://localhost:5173` |
 | `JWT_SECRET` | Segredo para assinar tokens JWT (mín. 16 chars) | `string-longa-e-secreta` |
 | `PORT` | Porta do servidor (padrão: 3000) | `3000` |
 | `NODE_ENV` | Ambiente de execução | `development` |

@@ -12,9 +12,10 @@ model Clinica {
   nome        String
   telefoneWpp String   @unique @map("telefone_wpp")
   endereco    String?
-  configJson  Json?    @map("config_json")
-  ativo       Boolean  @default(true)
-  createdAt   DateTime @default(now()) @map("created_at")
+  configJson          Json?    @map("config_json")
+  googleRefreshToken  String?  @map("google_refresh_token")
+  ativo               Boolean  @default(true)
+  createdAt           DateTime @default(now()) @map("created_at")
 
   profissionais Profissional[]
   pacientes     Paciente[]

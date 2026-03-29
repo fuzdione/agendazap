@@ -1,22 +1,34 @@
 import { prisma } from '../config/database.js';
 import { buildSystemPrompt, processMessage } from './claudeService.js';
-import { generateMockSlots } from '../utils/mockSlots.js';
+import { getAvailableSlots as getCalendarSlots, createEvent, checkConflict } from './calendarService.js';
 
 // Quantidade máxima de mensagens do histórico enviadas ao Claude
 const MAX_HISTORY = 10;
 
+// Janela de busca de slots: próximos 7 dias corridos
+const JANELA_SLOTS_DIAS = 7;
+
 /**
- * Busca os horários disponíveis para todos os profissionais ativos de uma clínica.
- * Por enquanto usa dados fictícios — será substituído por Google Calendar na Etapa 4.
+ * Busca os horários disponíveis para todos os profissionais ativos de uma clínica
+ * consultando o Google Calendar de cada um.
+ * Se um profissional não tiver calendar ou o Google estiver inacessível, usa mock como fallback.
  *
+ * @param {string} clinicaId
  * @param {Array} profissionais - Lista de profissionais ativos
- * @returns {Array<{ profissional: object, slots: Array }>}
+ * @returns {Promise<Array<{ profissional: object, slots: Array }>>}
  */
-function getAvailableSlots(profissionais) {
-  return profissionais.map((p) => ({
-    profissional: p,
-    slots: generateMockSlots(p.id, p.duracaoConsultaMin ?? 30, 5),
-  }));
+async function getAvailableSlots(clinicaId, profissionais) {
+  const agora = new Date();
+  const dataFim = new Date(agora.getTime() + JANELA_SLOTS_DIAS * 24 * 60 * 60 * 1000);
+
+  const resultados = await Promise.all(
+    profissionais.map(async (p) => ({
+      profissional: p,
+      slots: await getCalendarSlots(clinicaId, p.id, agora, dataFim),
+    }))
+  );
+
+  return resultados;
 }
 
 /**
@@ -111,7 +123,7 @@ async function criarAgendamento(clinicaId, paciente, contexto, profissional) {
       dataHora: new Date(contexto.data_hora),
       duracaoMin: profissional?.duracaoConsultaMin ?? 30,
       status: 'confirmado',
-      // calendarEventId e lembreteEnviado ficam nulos — serão preenchidos na Etapa 4
+      // calendarEventId é preenchido logo após a criação do evento no Google Calendar
     },
   });
 
@@ -157,8 +169,8 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
     orderBy: { nome: 'asc' },
   });
 
-  // 5. Obtém horários disponíveis (mock por enquanto)
-  const horariosDisponiveis = getAvailableSlots(profissionais);
+  // 5. Obtém horários disponíveis via Google Calendar (com fallback para mock)
+  const horariosDisponiveis = await getAvailableSlots(clinicaId, profissionais);
 
   // 6. Monta o system prompt com todo o contexto
   const systemPrompt = buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoConversa);
@@ -182,12 +194,52 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
     estadoConversa.contextoJson ?? {}
   );
 
-  // 8b. Se a ação for criar agendamento e os dados estiverem completos, cria o registro
+  // 8b. Se a ação for criar agendamento e os dados estiverem completos, verifica conflito e cria
+  // Declarada aqui para permitir early return no caso de conflito de horário
+  let respostaFinal = mensagemParaPaciente;
+
   if (controle.acao === 'criar_agendamento' && dadosAgendamentoCompletos(contextoAtualizado)) {
     const profissional = profissionais.find((p) => p.id === contextoAtualizado.profissional_id);
+    const duracaoMin = profissional?.duracaoConsultaMin ?? 30;
+
+    // Verifica race condition: outro paciente pode ter agendado o mesmo horário
+    const temConflito = await checkConflict(
+      clinicaId,
+      contextoAtualizado.profissional_id,
+      contextoAtualizado.data_hora,
+      duracaoMin
+    );
+
+    if (temConflito) {
+      // Horário já foi tomado — volta o estado para escolha de horário e avisa
+      await prisma.estadoConversa.update({
+        where: { telefone_clinicaId: { telefone, clinicaId } },
+        data: { estado: 'escolhendo_horario', contextoJson: { ...contextoAtualizado, data_hora: null } },
+      });
+
+      respostaFinal =
+        'Ops! Esse horário acabou de ser reservado por outro paciente. 😕 ' +
+        'Por favor, escolha outro horário na lista que enviei.';
+      return respostaFinal;
+    }
 
     try {
-      await criarAgendamento(clinicaId, paciente, contextoAtualizado, profissional);
+      const agendamento = await criarAgendamento(clinicaId, paciente, contextoAtualizado, profissional);
+
+      // Cria o evento correspondente no Google Calendar e salva o ID
+      const calendarEventId = await createEvent(clinicaId, contextoAtualizado.profissional_id, {
+        dataHora: contextoAtualizado.data_hora,
+        duracaoMin,
+        nomePaciente: contextoAtualizado.nome_paciente ?? paciente.nome ?? 'Paciente',
+        telefonePaciente: telefone,
+      });
+
+      if (calendarEventId) {
+        await prisma.agendamento.update({
+          where: { id: agendamento.id },
+          data: { calendarEventId },
+        });
+      }
     } catch (err) {
       console.error('Erro ao criar agendamento:', err.message);
       // Continua sem travar o fluxo — o Claude já enviou a confirmação ao paciente
@@ -201,7 +253,6 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
   }
 
   // 8c. Se confiança baixa, adiciona sugestão de contato humano ao final da mensagem
-  let respostaFinal = mensagemParaPaciente;
   if ((controle.confianca ?? 1.0) < 0.6) {
     const telefoneClinica = clinica.telefone ?? '';
     const sufixo = telefoneClinica

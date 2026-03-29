@@ -6,6 +6,8 @@ import { prisma, connectDatabase, disconnectDatabase } from './config/database.j
 import { redis, checkRedisConnection } from './config/redis.js';
 import { whatsappWebhookRoutes } from './webhooks/whatsapp.js';
 import { instanceRoutes } from './routes/admin/instance.js';
+import { googleAuthRoutes } from './routes/admin/googleAuth.js';
+import { professionalsRoutes } from './routes/admin/professionals.js';
 
 const server = Fastify({
   logger: {
@@ -58,6 +60,8 @@ server.get('/health', async (request, reply) => {
 // Rotas
 await server.register(whatsappWebhookRoutes);
 await server.register(instanceRoutes);
+await server.register(googleAuthRoutes);
+await server.register(professionalsRoutes);
 
 // Graceful shutdown
 async function shutdown() {
