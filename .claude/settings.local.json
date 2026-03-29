@@ -30,7 +30,9 @@
       "Bash(cmd //c \"netstat -ano | findstr :3000\")",
       "Bash(cmd //c \"taskkill /PID 13824 /F\")",
       "Bash(cmd //c \"taskkill /IM node.exe /F\")",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(npm install:*)"
     ]
   }
 }
