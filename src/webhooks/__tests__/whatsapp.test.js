@@ -23,6 +23,11 @@ vi.mock('../../services/whatsappService.js', () => ({
   sendTextMessage: vi.fn(),
 }));
 
+// Mock do conversationService — testes de estado estão em conversationService.test.js
+vi.mock('../../services/conversationService.js', () => ({
+  handleIncomingMessage: vi.fn().mockResolvedValue('Olá! Sou o assistente da Clínica Teste. Como posso ajudar?'),
+}));
+
 // Mock das variáveis de ambiente (evita carregar o .env nos testes)
 vi.mock('../../config/env.js', () => ({
   env: {
@@ -134,13 +139,13 @@ describe('Webhook /webhook/whatsapp — filtros', () => {
     expect(prisma.clinica.findFirst).not.toHaveBeenCalled();
   });
 
-  it('ignora mensagens com @lid (Evolution API dispara webhook duplo)', async () => {
+  it('processa mensagens com @lid (protocolo novo — não vem duplicado com @s.whatsapp.net)', async () => {
     const { status } = await callWebhook(
       buildPayload({ remoteJid: '276063401816202@lid', text: 'Oi' })
     );
 
     expect(status).toBe(200);
-    expect(prisma.clinica.findFirst).not.toHaveBeenCalled();
+    expect(prisma.clinica.findFirst).toHaveBeenCalled();
   });
 
   it('ignora mensagem de número sem clínica cadastrada', async () => {
