@@ -1,0 +1,126 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Clinica {
+  id          String   @id @default(uuid())
+  nome        String
+  telefoneWpp String   @unique @map("telefone_wpp")
+  endereco    String?
+  configJson  Json?    @map("config_json")
+  ativo       Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  profissionais Profissional[]
+  pacientes     Paciente[]
+  agendamentos  Agendamento[]
+  conversas     Conversa[]
+  estadosConversa EstadoConversa[]
+
+  @@map("clinicas")
+}
+
+model Profissional {
+  id                  String   @id @default(uuid())
+  clinicaId           String   @map("clinica_id")
+  nome                String
+  especialidade       String
+  calendarId          String?  @map("calendar_id")
+  duracaoConsultaMin  Int      @default(30) @map("duracao_consulta_min")
+  ativo               Boolean  @default(true)
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  clinica      Clinica       @relation(fields: [clinicaId], references: [id], onDelete: Cascade)
+  agendamentos Agendamento[]
+
+  @@map("profissionais")
+}
+
+model Paciente {
+  id        String   @id @default(uuid())
+  clinicaId String   @map("clinica_id")
+  nome      String?
+  telefone  String
+  email     String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  clinica      Clinica       @relation(fields: [clinicaId], references: [id], onDelete: Cascade)
+  agendamentos Agendamento[]
+  conversas    Conversa[]
+
+  @@unique([clinicaId, telefone])
+  @@map("pacientes")
+}
+
+model Agendamento {
+  id               String            @id @default(uuid())
+  clinicaId        String            @map("clinica_id")
+  profissionalId   String            @map("profissional_id")
+  pacienteId       String            @map("paciente_id")
+  dataHora         DateTime          @map("data_hora")
+  duracaoMin       Int               @default(30) @map("duracao_min")
+  status           StatusAgendamento @default(confirmado)
+  calendarEventId  String?           @map("calendar_event_id")
+  lembreteEnviado  Boolean           @default(false) @map("lembrete_enviado")
+  createdAt        DateTime          @default(now()) @map("created_at")
+
+  clinica      Clinica      @relation(fields: [clinicaId], references: [id], onDelete: Cascade)
+  profissional Profissional @relation(fields: [profissionalId], references: [id], onDelete: Cascade)
+  paciente     Paciente     @relation(fields: [pacienteId], references: [id], onDelete: Cascade)
+
+  @@map("agendamentos")
+}
+
+model Conversa {
+  id           String        @id @default(uuid())
+  clinicaId    String        @map("clinica_id")
+  pacienteId   String?       @map("paciente_id")
+  telefone     String
+  direcao      DirecaoMensagem
+  mensagem     String
+  metadataJson Json?         @map("metadata_json")
+  createdAt    DateTime      @default(now()) @map("created_at")
+
+  clinica  Clinica   @relation(fields: [clinicaId], references: [id], onDelete: Cascade)
+  paciente Paciente? @relation(fields: [pacienteId], references: [id], onDelete: SetNull)
+
+  @@map("conversas")
+}
+
+model EstadoConversa {
+  telefone     String
+  clinicaId    String        @map("clinica_id")
+  estado       EstadoBot     @default(inicio)
+  contextoJson Json?         @map("contexto_json")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  clinica Clinica @relation(fields: [clinicaId], references: [id], onDelete: Cascade)
+
+  @@id([telefone, clinicaId])
+  @@map("estado_conversa")
+}
+
+enum StatusAgendamento {
+  confirmado
+  cancelado
+  concluido
+  no_show
+}
+
+enum DirecaoMensagem {
+  entrada
+  saida
+}
+
+enum EstadoBot {
+  inicio
+  escolhendo_especialidade
+  escolhendo_horario
+  confirmando
+  concluido
+}
