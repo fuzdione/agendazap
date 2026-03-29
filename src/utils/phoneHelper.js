@@ -25,7 +25,7 @@ export function formatToWhatsApp(phone) {
  * Ex: "5561999990001@s.whatsapp.net" → "5561999990001"
  */
 export function formatFromWhatsApp(jid) {
-  return jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
+  return jid.replace('@s.whatsapp.net', '').replace('@g.us', '').replace('@lid', '');
 }
 
 /**

@@ -38,12 +38,17 @@ export async function whatsappWebhookRoutes(fastify) {
       return reply.status(200).send({ received: true });
     }
 
+    // Ignora mensagens com @lid — WhatsApp novo protocolo dispara o webhook duas vezes:
+    // uma com @lid e outra com @s.whatsapp.net. Processamos apenas a versão @s.whatsapp.net.
+    if (remoteJid.endsWith('@lid')) {
+      return reply.status(200).send({ received: true });
+    }
+
     // Extrai o texto da mensagem (apenas texto simples por enquanto)
     const textoMensagem = message?.conversation || message?.extendedTextMessage?.text;
     const isTextMessage = Boolean(textoMensagem);
 
     // Extrai o número que recebeu a mensagem — identifica a clínica
-    // O campo instance.name ou instanceName no payload da Evolution contém o nome da instância
     const instanceName = payload?.instance ?? payload?.instanceName ?? '';
 
     // Número do remetente (paciente)
@@ -58,7 +63,6 @@ export async function whatsappWebhookRoutes(fastify) {
 
     try {
       // Identifica a clínica pelo nome da instância (que é o telefone da clínica)
-      // O instanceName é criado com o telefone da clínica em POST /admin/instance/create
       const clinica = await prisma.clinica.findFirst({
         where: { telefoneWpp: instanceName, ativo: true },
       });
@@ -72,7 +76,7 @@ export async function whatsappWebhookRoutes(fastify) {
       if (!isTextMessage) {
         await sendTextMessage(
           instanceName,
-          telefoneRemetente,
+          remoteJid,
           'Desculpe, por enquanto só consigo ler mensagens de texto 😊'
         );
         return reply.status(200).send({ received: true });
@@ -111,7 +115,7 @@ export async function whatsappWebhookRoutes(fastify) {
       // Placeholder: resposta fixa até a IA ser integrada na Etapa 3
       const resposta = `Olá! Sou o assistente da ${clinica.nome}. Em breve poderei te ajudar a agendar consultas! 😊`;
 
-      await sendTextMessage(instanceName, telefoneRemetente, resposta);
+      await sendTextMessage(instanceName, remoteJid, resposta);
 
       // Salva a mensagem enviada (saída)
       await prisma.conversa.create({

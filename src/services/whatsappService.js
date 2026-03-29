@@ -81,8 +81,9 @@ export async function getQRCode(instanceName) {
  * @param {string} phone - Número do destinatário (qualquer formato brasileiro)
  * @param {string} text - Texto da mensagem
  */
-export async function sendTextMessage(instanceName, phone, text) {
-  const jid = formatToWhatsApp(phone);
+export async function sendTextMessage(instanceName, phoneOrJid, text) {
+  // Aceita número de telefone ou JID completo (ex: @s.whatsapp.net, @lid)
+  const jid = phoneOrJid.includes('@') ? phoneOrJid : formatToWhatsApp(phoneOrJid);
   console.log(`📤 Enviando mensagem para ${jid} via instância ${instanceName}`);
 
   let lastError;
@@ -93,9 +94,10 @@ export async function sendTextMessage(instanceName, phone, text) {
       const data = await request('POST', `/message/sendText/${instanceName}`, {
         number: jid,
         text,
+        options: { delay: 1200 },
       });
 
-      console.log(`✅ Mensagem enviada para ${phone} (tentativa ${attempt})`);
+      console.log(`✅ Mensagem enviada para ${jid} (tentativa ${attempt})`);
       return data;
     } catch (err) {
       lastError = err;

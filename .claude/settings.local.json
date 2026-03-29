@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(netstat -ano)",
+      "Bash(findstr \":3000\")",
+      "Bash(docker restart:*)",
+      "Bash(docker exec:*)",
+      "Bash(CLINICA_ID=\"cf998d93-a395-4a04-9500-91ffb5bb2e56\" curl -s -X POST http://localhost:3000/admin/instance/create -H \"Content-Type: application/json\" -d \"{\"\"clinicaId\"\": \"\"$CLINICA_ID\"\"}\")",
+      "Bash(node -e \"process.stdin.setEncoding\\(''''utf8''''\\);let d='''''''';process.stdin.on\\(''''data'''',c=>d+=c\\).on\\(''''end'''',\\(\\)=>{const r=JSON.parse\\(d\\);console.log\\(JSON.stringify\\(r,null,2\\)}\\)\")",
+      "Bash(CLINICA_ID=\"cf998d93-a395-4a04-9500-91ffb5bb2e56\")",
+      "Bash(curl -s -X POST http://localhost:3000/admin/instance/create -H \"Content-Type: application/json\" -d \"{\"\"clinicaId\"\": \"\"$CLINICA_ID\"\"}\")",
+      "Bash(docker compose:*)",
+      "Bash(CLINICA_ID=\"cf998d93-a395-4a04-9500-91ffb5bb2e56\" __NEW_LINE_386276c625e92b09__ echo \"=== QR Code ===\" curl -s \"http://localhost:3000/admin/instance/$CLINICA_ID/qrcode\")",
+      "Bash(python3 -c \":*)",
+      "Bash(curl -s http://localhost:3000/admin/instance/$CLINICA_ID/qrcode)",
+      "Bash(__NEW_LINE_8afd868087ec8771__ echo:*)",
+      "Bash(CLINICA_ID=\"cf998d93-a395-4a04-9500-91ffb5bb2e56\" curl -s \"http://localhost:3000/admin/instance/$CLINICA_ID/qrcode\")",
+      "Bash(grep -v \"^$\")",
+      "Bash(docker ps:*)",
+      "Bash(curl -s http://localhost:8080)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f''''Instâncias: {len\\(d\\)}''''\\); [print\\(f''''  {i[name]}: {i[connectionStatus]}''''\\) for i in d]\")",
+      "Bash(1 docker:*)",
+      "Bash(docker pull:*)",
+      "Bash(__NEW_LINE_2089c8a4f838c314__ echo:*)",
+      "Bash(curl -s \"http://localhost:3000/admin/instance/$CLINICA_ID/status\")",
+      "Bash(curl -s -X POST http://localhost:3000/webhook/whatsapp -H \"Content-Type: application/json\" -d '{\"\"event\"\":\"\"messages.upsert\"\",\"\"instance\"\":\"\"5561999990001\"\",\"\"data\"\":{\"\"key\"\":{\"\"fromMe\"\":true,\"\"remoteJid\"\":\"\"5561988880001@s.whatsapp.net\"\"},\"\"message\"\":{\"\"conversation\"\":\"\"oi\"\"}}}')",
+      "Bash(curl -s -X POST http://localhost:3000/webhook/whatsapp -H \"Content-Type: application/json\" -d '{\"\"event\"\":\"\"messages.upsert\"\",\"\"instance\"\":\"\"9999000000000\"\",\"\"data\"\":{\"\"key\"\":{\"\"fromMe\"\":false,\"\"remoteJid\"\":\"\"5561988880001@s.whatsapp.net\"\"},\"\"message\"\":{\"\"conversation\"\":\"\"oi\"\"}}}')",
+      "Bash(node -e \":*)",
+      "Bash(curl:*)",
+      "Bash(cmd //c \"netstat -ano | findstr :3000\")",
+      "Bash(cmd //c \"taskkill /PID 13824 /F\")",
+      "Bash(cmd //c \"taskkill /IM node.exe /F\")",
+      "Bash(git add:*)"
+    ]
+  }
+}
