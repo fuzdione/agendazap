@@ -39,12 +39,6 @@ export async function whatsappWebhookRoutes(fastify) {
       return reply.status(200).send({ received: true });
     }
 
-    // Ignora mensagens com @lid — WhatsApp novo protocolo dispara o webhook duas vezes:
-    // uma com @lid e outra com @s.whatsapp.net. Processamos apenas a versão @s.whatsapp.net.
-    if (remoteJid.endsWith('@lid')) {
-      return reply.status(200).send({ received: true });
-    }
-
     // Extrai o texto da mensagem (apenas texto simples por enquanto)
     const textoMensagem = message?.conversation || message?.extendedTextMessage?.text;
     const isTextMessage = Boolean(textoMensagem);

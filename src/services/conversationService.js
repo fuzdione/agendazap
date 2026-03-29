@@ -144,12 +144,12 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
   // 2. Busca ou cria o estado da conversa
   const estadoConversa = await getOrCreateEstadoConversa(clinicaId, telefone);
 
-  // 3. Busca o histórico recente (últimas N mensagens)
-  const historico = await prisma.conversa.findMany({
+  // 3. Busca o histórico recente (últimas N mensagens em ordem cronológica)
+  const historico = (await prisma.conversa.findMany({
     where: { clinicaId, telefone },
-    orderBy: { createdAt: 'asc' },
+    orderBy: { createdAt: 'desc' },
     take: MAX_HISTORY,
-  });
+  })).reverse();
 
   // 4. Busca profissionais ativos da clínica
   const profissionais = await prisma.profissional.findMany({

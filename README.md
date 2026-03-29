@@ -28,9 +28,11 @@ O paciente conversa com um bot inteligente no WhatsApp que agenda consultas sem 
   - `processMessage(messageText, systemPrompt, recentHistory, estadoAtual)` — chama `claude-sonnet-4-20250514` com histórico das últimas 10 mensagens; extrai mensagem ao paciente e JSON de controle das tags `<json></json>`; trata timeout (25s), rate limit (429) e erros de servidor com mensagem de fallback amigável
 - **`src/services/conversationService.js`** — orquestrador central:
   - `handleIncomingMessage(clinicaId, telefone, mensagemTexto, clinica)` — busca/cria paciente e estado da conversa, monta contexto, chama Claude, processa JSON de controle, atualiza estado, cria agendamento quando confirmado e adiciona contato humano em respostas de baixa confiança (< 0.6)
+  - Histórico sempre busca as **N mensagens mais recentes** (`orderBy: desc` + `reverse`) — evita janela deslizante partir do início e Claude perder contexto recente
 - **`src/utils/mockSlots.js`** — gerador de horários fictícios:
   - `generateMockSlots(profissionalId, duracaoMin, diasUteis)` — gera slots para os próximos N dias úteis (seg–sex, 08:00–18:00) com 30–40% dos slots removidos aleatoriamente para simular agenda parcialmente ocupada
-- **`src/webhooks/whatsapp.js`** (atualizado) — conectado ao `conversationService`, com fallback de erro exibindo telefone da clínica
+- **`src/webhooks/whatsapp.js`** (atualizado) — conectado ao `conversationService`, com fallback de erro exibindo telefone da clínica; processa JIDs `@lid` (protocolo novo do WhatsApp — nem sempre vem duplicado com `@s.whatsapp.net`)
+- **`src/server.js`** (atualizado) — `bodyLimit: 10485760` (10MB) para suportar payloads grandes da Evolution API (mensagens com mídia codificada em base64 causavam HTTP 413)
 
 ---
 

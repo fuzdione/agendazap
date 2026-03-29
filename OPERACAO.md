@@ -316,9 +316,75 @@ Abra no navegador: **http://localhost:8080/manager**
 
 ---
 
-## 4. BANCO DE DADOS
+## 4. CLAUDE API / IA
 
-### 4.1 Acessar o banco via Prisma Studio (interface visual)
+### 4.1 Testar a Claude API diretamente
+
+Verifica se a `CLAUDE_API_KEY` está válida e a API responde:
+
+```powershell
+cd C:\agendaZap\agendazap
+node -e "
+import('./src/services/claudeService.js').then(async ({ processMessage }) => {
+  const r = await processMessage('Quero agendar uma consulta', 'Você é assistente de clínica.', [], 'inicio');
+  console.log('Resposta:', r.mensagemParaPaciente);
+});
+"
+```
+
+**Resultado esperado:** Uma mensagem de saudação/boas-vindas do bot sem erros.
+**Se retornar** `"estou com uma instabilidade momentânea"`: verifique a `CLAUDE_API_KEY` no `.env`.
+
+---
+
+### 4.2 Ver histórico de conversas de um número
+
+```powershell
+docker exec -it agendazap-postgres psql -U agendazap -d agendazap -c "SELECT direcao, mensagem, created_at FROM public.conversas WHERE telefone = 'NUMERO' ORDER BY created_at;"
+```
+
+Substitua `NUMERO` pelo telefone sem formatação (ex: `5561999990001` ou o identificador `@lid` sem o sufixo).
+
+**Via Prisma Studio (visual):**
+```powershell
+cd C:\agendaZap\agendazap
+npx prisma studio
+```
+Acesse `http://localhost:5555` → tabela `Conversa` → filtre por `telefone`.
+
+---
+
+### 4.3 Ver estado atual de uma conversa
+
+```powershell
+docker exec -it agendazap-postgres psql -U agendazap -d agendazap -c "SELECT telefone, estado, contexto_json, updated_at FROM public.estado_conversa ORDER BY updated_at DESC LIMIT 10;"
+```
+
+Mostra em que etapa do fluxo cada paciente está e os dados já coletados (especialidade, horário, nome).
+
+---
+
+### 4.4 Resetar estado de uma conversa (forçar reinício)
+
+```powershell
+docker exec -it agendazap-postgres psql -U agendazap -d agendazap -c "UPDATE public.estado_conversa SET estado = 'inicio', contexto_json = '{}' WHERE telefone = 'NUMERO';"
+```
+
+**Quando usar:** Quando uma conversa travar em estado inconsistente durante testes.
+
+---
+
+### 4.5 Ver agendamentos criados pelo bot
+
+```powershell
+docker exec -it agendazap-postgres psql -U agendazap -d agendazap -c "SELECT a.id, p.nome AS paciente, pr.nome AS profissional, a.data_hora, a.status FROM public.agendamentos a JOIN public.pacientes p ON p.id = a.paciente_id JOIN public.profissionais pr ON pr.id = a.profissional_id ORDER BY a.data_hora;"
+```
+
+---
+
+## 5. BANCO DE DADOS
+
+### 5.1 Acessar o banco via Prisma Studio (interface visual)
 
 ```powershell
 cd C:\agendaZap\agendazap
@@ -330,7 +396,7 @@ npx prisma studio
 
 ---
 
-### 4.2 Sincronizar schema com o banco (sem criar migration)
+### 5.2 Sincronizar schema com o banco (sem criar migration)
 
 ```powershell
 npm run db:push
@@ -341,7 +407,7 @@ npm run db:push
 
 ---
 
-### 4.3 Criar e aplicar uma migration nomeada
+### 5.3 Criar e aplicar uma migration nomeada
 
 ```powershell
 npm run db:migrate
@@ -352,7 +418,7 @@ Será solicitado um nome para a migration (ex: `add_campo_observacoes`).
 
 ---
 
-### 4.4 Re-executar o seed (repopular dados de teste)
+### 5.4 Re-executar o seed (repopular dados de teste)
 
 ```powershell
 npm run db:seed
@@ -362,7 +428,7 @@ npm run db:seed
 
 ---
 
-### 4.5 Resetar banco de desenvolvimento (apaga tudo)
+### 5.5 Resetar banco de desenvolvimento (apaga tudo)
 
 ```powershell
 npx prisma migrate reset --force
@@ -374,7 +440,7 @@ npx prisma migrate reset --force
 
 ---
 
-### 4.6 Acessar o PostgreSQL diretamente via psql
+### 5.6 Acessar o PostgreSQL diretamente via psql
 
 ```powershell
 docker exec -it agendazap-postgres psql -U agendazap -d agendazap
@@ -391,7 +457,7 @@ SELECT * FROM public.clinicas;
 
 ---
 
-## 5. TROUBLESHOOTING
+## 6. TROUBLESHOOTING
 
 ### O bot não responde às mensagens
 
@@ -424,7 +490,12 @@ curl -X POST http://localhost:8080/webhook/set/NOME_DA_INSTANCIA `
 ```powershell
 docker logs agendazap-evolution --tail 30
 ```
-Procure por `ECONNREFUSED` (servidor parado) ou `ENOTFOUND` (URL errada).
+Procure por `ECONNREFUSED` (servidor parado), `ENOTFOUND` (URL errada) ou `status code 413` (payload muito grande — indica `bodyLimit` insuficiente no Fastify).
+
+**Passo 5 — Verifique se a Claude API está respondendo:**
+```powershell
+node -e "import('./src/services/claudeService.js').then(async({processMessage})=>{const r=await processMessage('oi','Assistente de clínica.',[]);console.log(r.mensagemParaPaciente);})"
+```
 
 ---
 
@@ -526,3 +597,7 @@ Resultado esperado: `{"status":"ok",...}`
 | Prisma Studio | `npx prisma studio` → http://localhost:5555 |
 | Logs do bot | Terminal onde `npm run dev` está rodando |
 | Logs Evolution | `docker logs agendazap-evolution --tail 50` |
+| Testar Claude API | `node -e "import('./src/services/claudeService.js').then(async({processMessage})=>{const r=await processMessage('oi','Assistente.',[]);console.log(r.mensagemParaPaciente);})"`  |
+| Ver conversas (banco) | `npx prisma studio` → tabela `Conversa` |
+| Ver estado das conversas | `docker exec -it agendazap-postgres psql -U agendazap -d agendazap -c "SELECT telefone, estado, updated_at FROM public.estado_conversa ORDER BY updated_at DESC LIMIT 10;"` |
+| Resetar conversa travada | `docker exec -it agendazap-postgres psql -U agendazap -d agendazap -c "UPDATE public.estado_conversa SET estado='inicio', contexto_json='{}' WHERE telefone='NUMERO';"` |

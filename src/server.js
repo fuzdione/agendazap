@@ -14,6 +14,7 @@ const server = Fastify({
       : undefined,
     level: env.NODE_ENV === 'development' ? 'info' : 'warn',
   },
+  bodyLimit: 10485760, // 10MB — Evolution API pode enviar payloads grandes com mídia
 });
 
 // Plugins
