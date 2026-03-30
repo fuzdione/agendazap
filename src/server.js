@@ -81,6 +81,10 @@ try {
   await connectDatabase();
   await server.listen({ port: env.PORT, host: '0.0.0.0' });
   console.log(`🚀 AgendaZap rodando em http://0.0.0.0:${env.PORT}`);
+
+  // Diagnóstico de credenciais Google (primeiros 10 chars — nunca loga o valor completo)
+  console.log(`🔑 GOOGLE_CLIENT_ID:     ${env.GOOGLE_CLIENT_ID?.slice(0, 10)}...`);
+  console.log(`🔑 GOOGLE_CLIENT_SECRET: ${env.GOOGLE_CLIENT_SECRET?.slice(0, 10)}...`);
 } catch (err) {
   server.log.error(err);
   process.exit(1);

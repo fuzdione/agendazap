@@ -52,9 +52,9 @@ function extractPatientMessage(text) {
  * @returns {string}
  */
 export function buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoConversa) {
-  // Formata a lista de profissionais e especialidades
+  // Formata a lista de profissionais e especialidades — UUID incluído para extração correta pelo modelo
   const listaProfissionais = profissionais
-    .map((p, i) => `  ${i + 1}. ${p.nome} — ${p.especialidade} (consulta de ${p.duracaoConsultaMin} min)`)
+    .map((p, i) => `  ${i + 1}. ${p.nome} — ${p.especialidade} (consulta de ${p.duracaoConsultaMin} min) [id: ${p.id}]`)
     .join('\n');
 
   // Formata os horários disponíveis por profissional

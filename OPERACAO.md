@@ -33,7 +33,9 @@ Abra o `.env` e preencha as chaves reais:
 | Variável | Onde obter |
 |---|---|
 | `CLAUDE_API_KEY` | console.anthropic.com |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | console.cloud.google.com |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | console.cloud.google.com → Credenciais → OAuth 2.0 |
+| `GOOGLE_REDIRECT_URI` | `http://localhost:3000/admin/google/callback` (deve ser cadastrado no Google Cloud) |
+| `ADMIN_URL` | URL do painel admin (padrão: `http://localhost:5173`) |
 | `JWT_SECRET` | Qualquer string longa e aleatória |
 
 As demais variáveis já funcionam com os valores padrão do ambiente local.
@@ -141,11 +143,11 @@ cd C:\agendaZap\agendazap
 npm test
 ```
 
-**O que faz:** Executa os 55 testes com Vitest (sem subir servidor, sem acessar banco ou APIs externas — tudo mockado).
+**O que faz:** Executa os 71 testes com Vitest (sem subir servidor, sem acessar banco ou APIs externas — tudo mockado).
 **Resultado esperado:**
 ```
- Test Files  4 passed (4)
-      Tests  55 passed (55)
+ Test Files  5 passed (5)
+      Tests  71 passed (71)
 ```
 
 **Modo watch** (re-executa ao salvar um arquivo):
@@ -361,7 +363,7 @@ import('./src/services/claudeService.js').then(async ({ processMessage }) => {
 ### 4.2 Ver histórico de conversas de um número
 
 ```powershell
-docker exec -it agendazap-postgres psql -U agendazap -d agendazap -c "SELECT direcao, mensagem, created_at FROM public.conversas WHERE telefone = 'NUMERO' ORDER BY created_at;"
+docker exec agendazap-postgres psql -U agendazap -d agendazap -c "SELECT direcao, mensagem, created_at FROM public.conversas WHERE telefone = 'NUMERO' ORDER BY created_at;"
 ```
 
 Substitua `NUMERO` pelo telefone sem formatação (ex: `5561999990001` ou o identificador `@lid` sem o sufixo).
@@ -378,7 +380,7 @@ Acesse `http://localhost:5555` → tabela `Conversa` → filtre por `telefone`.
 ### 4.3 Ver estado atual de uma conversa
 
 ```powershell
-docker exec -it agendazap-postgres psql -U agendazap -d agendazap -c "SELECT telefone, estado, contexto_json, updated_at FROM public.estado_conversa ORDER BY updated_at DESC LIMIT 10;"
+docker exec agendazap-postgres psql -U agendazap -d agendazap -c "SELECT telefone, estado, contexto_json, updated_at FROM public.estado_conversa ORDER BY updated_at DESC LIMIT 10;"
 ```
 
 Mostra em que etapa do fluxo cada paciente está e os dados já coletados (especialidade, horário, nome).
@@ -388,7 +390,7 @@ Mostra em que etapa do fluxo cada paciente está e os dados já coletados (espec
 ### 4.4 Resetar estado de uma conversa (forçar reinício)
 
 ```powershell
-docker exec -it agendazap-postgres psql -U agendazap -d agendazap -c "UPDATE public.estado_conversa SET estado = 'inicio', contexto_json = '{}' WHERE telefone = 'NUMERO';"
+docker exec agendazap-postgres psql -U agendazap -d agendazap -c "UPDATE public.estado_conversa SET estado = 'inicio', contexto_json = '{}' WHERE telefone = 'NUMERO';"
 ```
 
 **Quando usar:** Quando uma conversa travar em estado inconsistente durante testes.
@@ -398,7 +400,7 @@ docker exec -it agendazap-postgres psql -U agendazap -d agendazap -c "UPDATE pub
 ### 4.5 Ver agendamentos criados pelo bot
 
 ```powershell
-docker exec -it agendazap-postgres psql -U agendazap -d agendazap -c "SELECT a.id, p.nome AS paciente, pr.nome AS profissional, a.data_hora, a.status FROM public.agendamentos a JOIN public.pacientes p ON p.id = a.paciente_id JOIN public.profissionais pr ON pr.id = a.profissional_id ORDER BY a.data_hora;"
+docker exec agendazap-postgres psql -U agendazap -d agendazap -c "SELECT a.id, p.nome AS paciente, pr.nome AS profissional, a.data_hora, a.status FROM public.agendamentos a JOIN public.pacientes p ON p.id = a.paciente_id JOIN public.profissionais pr ON pr.id = a.profissional_id ORDER BY a.data_hora;"
 ```
 
 ---
@@ -464,7 +466,7 @@ npx prisma migrate reset --force
 ### 5.6 Acessar o PostgreSQL diretamente via psql
 
 ```powershell
-docker exec -it agendazap-postgres psql -U agendazap -d agendazap
+docker exec agendazap-postgres psql -U agendazap -d agendazap
 ```
 
 **Comandos úteis dentro do psql:**
@@ -475,6 +477,92 @@ docker exec -it agendazap-postgres psql -U agendazap -d agendazap
 SELECT * FROM public.clinicas;
 \q                    -- sair
 ```
+
+---
+
+## 5. GOOGLE CALENDAR
+
+### 5.1 Verificar se a clínica tem Google Calendar autorizado
+
+```powershell
+curl http://localhost:3000/admin/google/status/ID_DA_CLINICA
+```
+
+**Resultado esperado quando autorizado:**
+```json
+{ "success": true, "data": { "conectado": true } }
+```
+
+Se `"conectado": false`, execute o passo 5.2.
+
+---
+
+### 5.2 Autorizar Google Calendar (fluxo OAuth)
+
+Abra no navegador:
+```
+http://localhost:3000/admin/google/auth/ID_DA_CLINICA
+```
+
+Faça login com a conta Google que tem os calendários dos profissionais → clique em **Permitir**.
+
+O navegador vai redirecionar para:
+```
+http://localhost:5173/?google_auth=success&clinicaId=ID_DA_CLINICA
+```
+
+Se aparecer `google_auth=error&reason=...`, o campo `reason` na URL indica o problema (veja Troubleshooting seção 6).
+
+---
+
+### 5.3 Listar calendários disponíveis da conta Google
+
+```powershell
+curl http://localhost:3000/admin/calendars/ID_DA_CLINICA | Select-Object -ExpandProperty Content
+```
+
+Retorna a lista de calendários da conta Google conectada com `id` e `summary`.
+
+---
+
+### 5.4 Vincular um calendar a um profissional
+
+```powershell
+curl -X PUT http://localhost:3000/admin/profissionais/ID_DO_PROFISSIONAL/calendar `
+  -H "Content-Type: application/json" `
+  -d '{\"calendarId\": \"ID_DO_CALENDAR\"}'
+```
+
+**Onde obter os IDs:**
+- `ID_DO_PROFISSIONAL` — via Prisma Studio (`npx prisma studio`) → tabela `Profissional`
+- `ID_DO_CALENDAR` — pelo comando 5.3 acima
+
+**Resultado esperado:**
+```json
+{ "success": true, "data": { "id": "...", "calendarId": "...", ... } }
+```
+
+---
+
+### 5.5 Verificar agendamentos com evento criado no Calendar
+
+```powershell
+docker exec agendazap-postgres psql -U agendazap -d agendazap -c "SELECT a.id, pa.nome AS paciente, pr.nome AS profissional, a.data_hora, a.status, a.calendar_event_id FROM agendamentos a JOIN pacientes pa ON pa.id = a.paciente_id JOIN profissionais pr ON pr.id = a.profissional_id ORDER BY a.created_at DESC LIMIT 10;"
+```
+
+- `calendar_event_id` preenchido = evento criado com sucesso no Google Calendar
+- `calendar_event_id` nulo = evento não foi criado (verifique os logs do servidor)
+
+---
+
+### 5.6 IDs dos profissionais de desenvolvimento (seed)
+
+| Profissional | UUID |
+|---|---|
+| Dr. João Silva | `e9969385-9733-4d03-aee4-87989cfa4d2f` |
+| Dra. Maria Santos | `8cec83b8-3496-4d8c-8468-2bf2bacedfcd` |
+| Dra. Ana Costa | `c4f2d409-cfc6-4bb9-9008-676070182748` |
+| Clínica Saúde Plena | `cf998d93-a395-4a04-9500-91ffb5bb2e56` |
 
 ---
 
@@ -579,6 +667,41 @@ curl -X POST http://localhost:3000/admin/instance/create `
 
 ---
 
+### Erro no OAuth do Google Calendar (`google_auth=error`)
+
+O campo `reason` na URL de redirecionamento indica a causa:
+
+| `reason` | Causa | Solução |
+|---|---|---|
+| `invalid_client` | `GOOGLE_CLIENT_ID` ou `GOOGLE_CLIENT_SECRET` incorreto no `.env` | Verifique os valores no Google Cloud Console → Credenciais |
+| `redirect_uri_mismatch` | A URI de callback não está cadastrada no Google Cloud | Adicione `http://localhost:3000/admin/google/callback` em **URIs de redirecionamento autorizados** |
+| `invalid_grant` | O `code` OAuth expirou ou já foi usado | Acesse `/admin/google/auth/ID` novamente para gerar novo code |
+| `access_denied` | Usuário clicou em "Cancelar" na tela de consentimento | Repita o fluxo e clique em **Permitir** |
+| Erro Prisma `googleRefreshToken` | Prisma Client desatualizado | Rode `npm run db:push` e reinicie o servidor |
+
+---
+
+### Agendamento confirmado mas evento não aparece no Google Calendar
+
+**Passo 1 — Verifique se o `calendar_event_id` foi salvo:**
+```powershell
+docker exec agendazap-postgres psql -U agendazap -d agendazap -c "SELECT id, calendar_event_id, data_hora FROM agendamentos ORDER BY created_at DESC LIMIT 3;"
+```
+Se `calendar_event_id` for NULL, o `createEvent` falhou silenciosamente.
+
+**Passo 2 — Veja os logs do servidor** no terminal onde `npm run dev` está rodando. Procure por:
+```
+Erro ao criar agendamento: ...
+Contexto no momento do erro: ...
+```
+
+**Causas comuns:**
+- `profissional_id` no contexto não é um UUID válido → Claude sem UUID no prompt (bug corrigido na Etapa 4)
+- Profissional sem `calendarId` vinculado → execute o passo 5.4
+- Token Google expirado → repita o passo 5.2
+
+---
+
 ### Como verificar se o webhook está recebendo mensagens
 
 **Simule um webhook manualmente do terminal:**
@@ -609,7 +732,7 @@ Resultado esperado: `{"status":"ok",...}`
 
 | Ação | Comando |
 |---|---|
-| Rodar testes | `npm test` |
+| Rodar testes (71) | `npm test` |
 | Subir tudo | `docker compose start && npm run dev` |
 | Parar bot (celular normal) | `taskkill /IM node.exe /F` |
 | Parar tudo | `taskkill /IM node.exe /F && docker compose stop` |
@@ -621,5 +744,10 @@ Resultado esperado: `{"status":"ok",...}`
 | Logs Evolution | `docker logs agendazap-evolution --tail 50` |
 | Testar Claude API | `node -e "import('./src/services/claudeService.js').then(async({processMessage})=>{const r=await processMessage('oi','Assistente.',[]);console.log(r.mensagemParaPaciente);})"`  |
 | Ver conversas (banco) | `npx prisma studio` → tabela `Conversa` |
-| Ver estado das conversas | `docker exec -it agendazap-postgres psql -U agendazap -d agendazap -c "SELECT telefone, estado, updated_at FROM public.estado_conversa ORDER BY updated_at DESC LIMIT 10;"` |
-| Resetar conversa travada | `docker exec -it agendazap-postgres psql -U agendazap -d agendazap -c "UPDATE public.estado_conversa SET estado='inicio', contexto_json='{}' WHERE telefone='NUMERO';"` |
+| Ver estado das conversas | `docker exec agendazap-postgres psql -U agendazap -d agendazap -c "SELECT telefone, estado, updated_at FROM public.estado_conversa ORDER BY updated_at DESC LIMIT 10;"` |
+| Resetar conversa travada | `docker exec agendazap-postgres psql -U agendazap -d agendazap -c "UPDATE public.estado_conversa SET estado='inicio', contexto_json='{}' WHERE telefone='NUMERO';"` |
+| Status OAuth Google | `curl http://localhost:3000/admin/google/status/ID_DA_CLINICA` |
+| Autorizar Google Calendar | Abrir no browser: `http://localhost:3000/admin/google/auth/ID_DA_CLINICA` |
+| Listar calendários Google | `curl http://localhost:3000/admin/calendars/ID_DA_CLINICA \| Select-Object -ExpandProperty Content` |
+| Vincular calendar a profissional | `curl -X PUT http://localhost:3000/admin/profissionais/ID/calendar -H "Content-Type: application/json" -d '{\"calendarId\": \"ID\"}'` |
+| Ver agendamentos + calendar_event_id | `docker exec agendazap-postgres psql -U agendazap -d agendazap -c "SELECT pa.nome, pr.nome, a.data_hora, a.calendar_event_id FROM agendamentos a JOIN pacientes pa ON pa.id=a.paciente_id JOIN profissionais pr ON pr.id=a.profissional_id ORDER BY a.created_at DESC LIMIT 5;"` |

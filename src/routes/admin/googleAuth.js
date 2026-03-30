@@ -41,6 +41,14 @@ export async function googleAuthRoutes(fastify) {
       return reply.status(400).send({ success: false, error: 'Parâmetros inválidos no callback' });
     }
 
+    // Loga os parâmetros recebidos para diagnóstico (nunca loga o code completo)
+    request.log.info({
+      msg: 'Callback OAuth recebido',
+      clinicaId,
+      codePrefix: code?.slice(0, 10),
+      redirectUri: env.GOOGLE_REDIRECT_URI,
+    });
+
     try {
       await handleCallback(code, clinicaId);
       request.log.info({ msg: 'Google Calendar autorizado', clinicaId });
@@ -48,8 +56,21 @@ export async function googleAuthRoutes(fastify) {
       // Redireciona de volta ao painel com flag de sucesso
       return reply.redirect(`${env.ADMIN_URL ?? 'http://localhost:5173'}?google_auth=success&clinicaId=${clinicaId}`);
     } catch (err) {
-      request.log.error({ msg: 'Erro no callback OAuth Google', error: err.message });
-      return reply.redirect(`${env.ADMIN_URL ?? 'http://localhost:5173'}?google_auth=error`);
+      // err.response?.data contém o detalhe real do erro retornado pelo Google
+      const googleError = err.response?.data ?? err.message;
+      request.log.error({
+        msg: 'Erro no callback OAuth Google',
+        error: err.message,
+        googleResponse: googleError,
+        redirectUri: env.GOOGLE_REDIRECT_URI,
+        clientIdPrefix: env.GOOGLE_CLIENT_ID?.slice(0, 20),
+      });
+
+      // Passa o motivo na URL para facilitar diagnóstico sem abrir os logs
+      const motivo = encodeURIComponent(
+        typeof googleError === 'object' ? (googleError.error ?? JSON.stringify(googleError)) : googleError
+      );
+      return reply.redirect(`${env.ADMIN_URL ?? 'http://localhost:5173'}?google_auth=error&reason=${motivo}`);
     }
   });
 

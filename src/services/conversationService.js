@@ -241,8 +241,9 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
         });
       }
     } catch (err) {
+      // Loga contexto completo para facilitar diagnóstico de problemas com UUIDs ou formato de data
       console.error('Erro ao criar agendamento:', err.message);
-      // Continua sem travar o fluxo — o Claude já enviou a confirmação ao paciente
+      console.error('Contexto no momento do erro:', JSON.stringify(contextoAtualizado));
     }
 
     // Reseta o estado para início após agendamento concluído
