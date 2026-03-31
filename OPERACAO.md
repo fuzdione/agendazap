@@ -728,10 +728,123 @@ Resultado esperado: `{"status":"ok",...}`
 
 ---
 
+---
+
+## Simulador de Mensagens (sem WhatsApp real)
+
+O simulador permite testar o bot completo — incluindo Claude AI, banco de dados e Google Calendar — sem precisar de celular nem créditos desnecessários de infraestrutura.
+
+**Pré-requisito:** servidor rodando com `NODE_ENV=development` (padrão do `npm run dev`).
+
+---
+
+### Endpoints disponíveis
+
+| Rota | Método | Descrição |
+|---|---|---|
+| `/dev/simulate` | POST | Envia mensagem e recebe resposta do bot |
+| `/dev/simulate/state/:phone` | GET | Ver estado atual da conversa |
+| `/dev/simulate/reset/:phone` | GET | Resetar conversa para o início |
+
+> Esses endpoints retornam **404** se `NODE_ENV` não for `development`.
+
+---
+
+### Passo 1 — Enviar mensagem e ver resposta
+
+```powershell
+# Troque o "phone" pelo número que quiser usar como paciente de teste
+Invoke-WebRequest -Uri "http://localhost:3000/dev/simulate" `
+  -Method POST `
+  -ContentType "application/json" `
+  -Body '{"phone":"5561999990002","message":"Oi"}' | Select-Object -ExpandProperty Content
+```
+
+**Resposta esperada:**
+```json
+{
+  "success": true,
+  "data": {
+    "mensagemRecebida": "Oi",
+    "respostaBot": "Olá! Bem-vindo à Clínica...",
+    "estadoConversa": "escolhendo_especialidade",
+    "contexto": {}
+  }
+}
+```
+
+---
+
+### Passo 2 — Continuar a conversa (mesmas chamadas em sequência)
+
+```powershell
+# Mensagem 1: iniciar
+Invoke-WebRequest -Uri "http://localhost:3000/dev/simulate" `
+  -Method POST -ContentType "application/json" `
+  -Body '{"phone":"5561999990002","message":"Oi"}' | Select-Object -ExpandProperty Content
+
+# Mensagem 2: escolher especialidade
+Invoke-WebRequest -Uri "http://localhost:3000/dev/simulate" `
+  -Method POST -ContentType "application/json" `
+  -Body '{"phone":"5561999990002","message":"Quero consulta com cardiologista"}' | Select-Object -ExpandProperty Content
+
+# Mensagem 3: escolher horário (use um horário que o bot sugeriu)
+Invoke-WebRequest -Uri "http://localhost:3000/dev/simulate" `
+  -Method POST -ContentType "application/json" `
+  -Body '{"phone":"5561999990002","message":"Quero segunda às 10h"}' | Select-Object -ExpandProperty Content
+
+# Mensagem 4: confirmar
+Invoke-WebRequest -Uri "http://localhost:3000/dev/simulate" `
+  -Method POST -ContentType "application/json" `
+  -Body '{"phone":"5561999990002","message":"Confirmo. Meu nome é João Silva"}' | Select-Object -ExpandProperty Content
+```
+
+---
+
+### Passo 3 — Inspecionar o estado da conversa
+
+```powershell
+Invoke-WebRequest -Uri "http://localhost:3000/dev/simulate/state/5561999990002" `
+  -Method GET | Select-Object -ExpandProperty Content
+```
+
+**Retorna:** estado atual, contexto acumulado, últimas 10 mensagens e agendamentos criados.
+
+---
+
+### Passo 4 — Resetar e recomeçar do zero
+
+```powershell
+Invoke-WebRequest -Uri "http://localhost:3000/dev/simulate/reset/5561999990002" `
+  -Method GET | Select-Object -ExpandProperty Content
+```
+
+**Retorna:** estado anterior, confirmação do reset e número de agendamentos removidos.
+
+---
+
+### Verificar no banco de dados
+
+Após simular, verifique os registros no Prisma Studio:
+
+```powershell
+npx prisma studio
+```
+
+Acesse `http://localhost:5555` e inspecione:
+- Tabela `Conversa` — mensagens de entrada e saída salvas
+- Tabela `EstadoConversa` — estado e contexto acumulado
+- Tabela `Agendamento` — agendamentos criados pela simulação
+
+---
+
 ## Referência Rápida
 
 | Ação | Comando |
 |---|---|
+| Simular mensagem (dev) | `Invoke-WebRequest -Uri "http://localhost:3000/dev/simulate" -Method POST -ContentType "application/json" -Body '{"phone":"5561999990002","message":"Oi"}' \| Select-Object -ExpandProperty Content` |
+| Ver estado simulação (dev) | `Invoke-WebRequest -Uri "http://localhost:3000/dev/simulate/state/5561999990002" -Method GET \| Select-Object -ExpandProperty Content` |
+| Resetar simulação (dev) | `Invoke-WebRequest -Uri "http://localhost:3000/dev/simulate/reset/5561999990002" -Method GET \| Select-Object -ExpandProperty Content` |
 | Rodar testes (71) | `npm test` |
 | Subir tudo | `docker compose start && npm run dev` |
 | Parar bot (celular normal) | `taskkill /IM node.exe /F` |

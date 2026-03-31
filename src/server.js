@@ -8,6 +8,7 @@ import { whatsappWebhookRoutes } from './webhooks/whatsapp.js';
 import { instanceRoutes } from './routes/admin/instance.js';
 import { googleAuthRoutes } from './routes/admin/googleAuth.js';
 import { professionalsRoutes } from './routes/admin/professionals.js';
+import { devSimulateRoutes } from './routes/dev/simulate.js';
 
 const server = Fastify({
   logger: {
@@ -62,6 +63,9 @@ await server.register(whatsappWebhookRoutes);
 await server.register(instanceRoutes);
 await server.register(googleAuthRoutes);
 await server.register(professionalsRoutes);
+
+// Rotas de desenvolvimento — simulador de mensagens (apenas NODE_ENV=development)
+await server.register(devSimulateRoutes);
 
 // Graceful shutdown
 async function shutdown() {
