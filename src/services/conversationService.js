@@ -1,5 +1,5 @@
 import { prisma } from '../config/database.js';
-import { buildSystemPrompt, processMessage } from './claudeService.js';
+import { buildSystemPrompt, processMessage } from './aiService.js';
 import { getAvailableSlots as getCalendarSlots, createEvent, checkConflict } from './calendarService.js';
 
 // Quantidade máxima de mensagens do histórico enviadas ao Claude
@@ -90,11 +90,11 @@ async function atualizarEstadoConversa(clinicaId, telefone, novoEstado, dadosExt
  * @param {object} contexto
  * @returns {boolean}
  */
-function dadosAgendamentoCompletos(contexto) {
+function dadosAgendamentoCompletos(contexto, paciente) {
   return Boolean(
     contexto.profissional_id &&
     contexto.data_hora &&
-    contexto.nome_paciente
+    (contexto.nome_paciente || paciente?.nome)
   );
 }
 
@@ -198,7 +198,7 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
   // Declarada aqui para permitir early return no caso de conflito de horário
   let respostaFinal = mensagemParaPaciente;
 
-  if (controle.acao === 'criar_agendamento' && dadosAgendamentoCompletos(contextoAtualizado)) {
+  if (controle.acao === 'criar_agendamento' && dadosAgendamentoCompletos(contextoAtualizado, paciente)) {
     const profissional = profissionais.find((p) => p.id === contextoAtualizado.profissional_id);
     const duracaoMin = profissional?.duracaoConsultaMin ?? 30;
 

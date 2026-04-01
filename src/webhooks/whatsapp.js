@@ -2,6 +2,12 @@ import { prisma } from '../config/database.js';
 import { sendTextMessage } from '../services/whatsappService.js';
 import { handleIncomingMessage } from '../services/conversationService.js';
 import { formatFromWhatsApp } from '../utils/phoneHelper.js';
+import { env } from '../config/env.js';
+
+// Whitelist de remetentes permitidos (vazia = aceita todos)
+const WHITELIST = env.TEST_PHONE_WHITELIST
+  ? env.TEST_PHONE_WHITELIST.split(',').map((n) => n.trim()).filter(Boolean)
+  : [];
 
 /**
  * Registra a rota POST /webhook/whatsapp no servidor Fastify.
@@ -39,6 +45,12 @@ export async function whatsappWebhookRoutes(fastify) {
       return reply.status(200).send({ received: true });
     }
 
+    // @lid = ID interno de privacidade do WhatsApp — Evolution API não suporta envio para esse formato
+    if (remoteJid.includes('@lid')) {
+      request.log.warn({ msg: 'Ignorado: @lid não suportado pela Evolution API', jid: remoteJid });
+      return reply.status(200).send({ received: true });
+    }
+
     // Extrai o texto da mensagem (apenas texto simples por enquanto)
     const textoMensagem = message?.conversation || message?.extendedTextMessage?.text;
     const isTextMessage = Boolean(textoMensagem);
@@ -48,6 +60,11 @@ export async function whatsappWebhookRoutes(fastify) {
 
     // Número do remetente (paciente)
     const telefoneRemetente = formatFromWhatsApp(remoteJid);
+
+    // Whitelist de teste — se definida, ignora números não listados
+    if (WHITELIST.length > 0 && !WHITELIST.includes(telefoneRemetente)) {
+      return reply.status(200).send({ received: true });
+    }
 
     request.log.info({
       msg: 'Webhook recebido',
