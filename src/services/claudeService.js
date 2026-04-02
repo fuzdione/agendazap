@@ -79,6 +79,12 @@ export function buildSystemPrompt(clinica, profissionais, horariosDisponiveis, e
     })
     .join('\n\n');
 
+  // Data atual em Brasília — injetada no prompt para Claude nunca inferir o ano errado
+  const agoraBrasilia = new Date().toLocaleString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric',
+  });
+
   // Estado atual e contexto acumulado da conversa
   const estadoAtual = estadoConversa?.estado ?? 'inicio';
   const contexto = estadoConversa?.contextoJson ?? {};
@@ -95,6 +101,9 @@ OBRIGATÓRIO: Antes de confirmar o agendamento, pergunte: "Essa consulta é para
 
   return `Você é o assistente virtual da ${clinica.nome}, uma clínica localizada em ${clinica.endereco ?? 'endereço não informado'}.
 Seu papel é ajudar pacientes a agendar consultas pelo WhatsApp de forma cordial, objetiva e eficiente.
+
+## DATA ATUAL
+Hoje é ${agoraBrasilia}. Use sempre este ano ao interpretar datas mencionadas pelo paciente ou ao gerar o campo "data_hora" no JSON. NUNCA use um ano diferente do atual ou futuro próximo.
 
 ## REGRAS DE COMPORTAMENTO
 - Seja sempre cordial e objetivo. Use no máximo 2 emojis por mensagem.
