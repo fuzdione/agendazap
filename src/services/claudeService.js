@@ -51,7 +51,7 @@ function extractPatientMessage(text) {
  * @param {object} estadoConversa - Registro atual de estado_conversa (pode ser null)
  * @returns {string}
  */
-export function buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoConversa) {
+export function buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoConversa, nomesConhecidos = []) {
   // Formata a lista de profissionais e especialidades — UUID incluído para extração correta pelo modelo
   const listaProfissionais = profissionais
     .map((p, i) => `  ${i + 1}. ${p.nome} — ${p.especialidade} (consulta de ${p.duracaoConsultaMin} min) [id: ${p.id}]`)
@@ -73,6 +73,15 @@ export function buildSystemPrompt(clinica, profissionais, horariosDisponiveis, e
   const contexto = estadoConversa?.contextoJson ?? {};
   const contextoFormatado = JSON.stringify(contexto, null, 2);
 
+  // Instrução de identificação do paciente baseada nos nomes já conhecidos
+  const identificacaoPaciente = nomesConhecidos.length > 0
+    ? `Pacientes já cadastrados neste telefone: ${nomesConhecidos.join(', ')}.
+OBRIGATÓRIO: Antes de confirmar o agendamento, pergunte: "Essa consulta é para ${nomesConhecidos.join(' ou ')}? Ou está agendando para outra pessoa?"
+- Se confirmar um dos nomes → use exatamente esse nome como nome_paciente nos dados_extraidos
+- Se for outra pessoa → peça o nome completo e use-o como nome_paciente
+- Não use "acao": "criar_agendamento" sem ter nome_paciente definido`
+    : 'Primeiro contato deste telefone. Peça o nome completo antes de confirmar o agendamento. Não pedir email, CPF ou outros dados — apenas nome.';
+
   return `Você é o assistente virtual da ${clinica.nome}, uma clínica localizada em ${clinica.endereco ?? 'endereço não informado'}.
 Seu papel é ajudar pacientes a agendar consultas pelo WhatsApp de forma cordial, objetiva e eficiente.
 
@@ -85,6 +94,9 @@ Seu papel é ajudar pacientes a agendar consultas pelo WhatsApp de forma cordial
 - Se a mensagem for muito vaga ou você tiver baixa confiança na interpretação, peça esclarecimento de forma amigável.
 - Após 3 tentativas sem entender o paciente, sugira que ele ligue para a recepção.
 - Quando confirmar um agendamento, sempre repita: profissional, especialidade, data e horário.
+
+## IDENTIFICAÇÃO DO PACIENTE
+${identificacaoPaciente}
 
 ## PROFISSIONAIS E ESPECIALIDADES DISPONÍVEIS
 ${listaProfissionais || '  (nenhum profissional cadastrado)'}

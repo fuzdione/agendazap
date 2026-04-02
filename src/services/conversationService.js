@@ -90,11 +90,11 @@ async function atualizarEstadoConversa(clinicaId, telefone, novoEstado, dadosExt
  * @param {object} contexto
  * @returns {boolean}
  */
-function dadosAgendamentoCompletos(contexto, paciente) {
+function dadosAgendamentoCompletos(contexto) {
   return Boolean(
     contexto.profissional_id &&
     contexto.data_hora &&
-    (contexto.nome_paciente || paciente?.nome)
+    contexto.nome_paciente
   );
 }
 
@@ -107,19 +107,38 @@ function dadosAgendamentoCompletos(contexto, paciente) {
  * @param {object} profissional - Profissional correspondente ao profissional_id
  */
 async function criarAgendamento(clinicaId, paciente, contexto, profissional) {
-  // Atualiza o nome do paciente se ainda não estiver definido
-  if (!paciente.nome && contexto.nome_paciente) {
-    await prisma.paciente.update({
-      where: { id: paciente.id },
-      data: { nome: contexto.nome_paciente },
+  const nomePaciente = contexto.nome_paciente;
+
+  // Determina o paciente correto para o agendamento (pode ser um familiar diferente)
+  let pacienteParaAgendar = paciente;
+
+  if (nomePaciente) {
+    // Busca paciente existente com esse nome neste telefone
+    const pacienteNomeado = await prisma.paciente.findFirst({
+      where: { clinicaId, telefone: paciente.telefone, nome: nomePaciente },
     });
+
+    if (pacienteNomeado) {
+      pacienteParaAgendar = pacienteNomeado;
+    } else if (!paciente.nome) {
+      // Paciente principal ainda sem nome — nomeia-o
+      pacienteParaAgendar = await prisma.paciente.update({
+        where: { id: paciente.id },
+        data: { nome: nomePaciente },
+      });
+    } else {
+      // Paciente principal já tem outro nome — cria novo registro para este familiar
+      pacienteParaAgendar = await prisma.paciente.create({
+        data: { clinicaId, telefone: paciente.telefone, nome: nomePaciente },
+      });
+    }
   }
 
   const agendamento = await prisma.agendamento.create({
     data: {
       clinicaId,
       profissionalId: contexto.profissional_id,
-      pacienteId: paciente.id,
+      pacienteId: pacienteParaAgendar.id,
       dataHora: new Date(contexto.data_hora),
       duracaoMin: profissional?.duracaoConsultaMin ?? 30,
       status: 'confirmado',
@@ -127,7 +146,7 @@ async function criarAgendamento(clinicaId, paciente, contexto, profissional) {
     },
   });
 
-  console.log(`✅ Agendamento criado: id=${agendamento.id} para paciente ${paciente.id}`);
+  console.log(`✅ Agendamento criado: id=${agendamento.id} para ${nomePaciente} (paciente ${pacienteParaAgendar.id})`);
   return agendamento;
 }
 
@@ -142,9 +161,10 @@ async function criarAgendamento(clinicaId, paciente, contexto, profissional) {
  * @returns {Promise<string>} - Mensagem a ser enviada ao paciente
  */
 export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, clinica) {
-  // 1. Busca ou cria o paciente
-  let paciente = await prisma.paciente.findUnique({
-    where: { clinicaId_telefone: { clinicaId, telefone } },
+  // 1. Busca ou cria o paciente principal (mais antigo deste telefone)
+  let paciente = await prisma.paciente.findFirst({
+    where: { clinicaId, telefone },
+    orderBy: { createdAt: 'asc' },
   });
 
   if (!paciente) {
@@ -152,6 +172,14 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
       data: { clinicaId, telefone },
     });
   }
+
+  // Busca todos os nomes já cadastrados para este telefone (para confirmação de identidade)
+  const pacientesConhecidos = await prisma.paciente.findMany({
+    where: { clinicaId, telefone, nome: { not: null } },
+    select: { nome: true },
+    orderBy: { createdAt: 'asc' },
+  });
+  const nomesConhecidos = pacientesConhecidos.map((p) => p.nome);
 
   // 2. Busca ou cria o estado da conversa
   const estadoConversa = await getOrCreateEstadoConversa(clinicaId, telefone);
@@ -173,7 +201,7 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
   const horariosDisponiveis = await getAvailableSlots(clinicaId, profissionais);
 
   // 6. Monta o system prompt com todo o contexto
-  const systemPrompt = buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoConversa);
+  const systemPrompt = buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoConversa, nomesConhecidos);
 
   // 7. Chama o Claude para interpretar a mensagem e gerar a resposta
   const { mensagemParaPaciente, controle } = await processMessage(
@@ -198,7 +226,7 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
   // Declarada aqui para permitir early return no caso de conflito de horário
   let respostaFinal = mensagemParaPaciente;
 
-  if (controle.acao === 'criar_agendamento' && dadosAgendamentoCompletos(contextoAtualizado, paciente)) {
+  if (controle.acao === 'criar_agendamento' && dadosAgendamentoCompletos(contextoAtualizado)) {
     const profissional = profissionais.find((p) => p.id === contextoAtualizado.profissional_id);
     const duracaoMin = profissional?.duracaoConsultaMin ?? 30;
 
@@ -230,7 +258,7 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
       const calendarEventId = await createEvent(clinicaId, contextoAtualizado.profissional_id, {
         dataHora: contextoAtualizado.data_hora,
         duracaoMin,
-        nomePaciente: contextoAtualizado.nome_paciente ?? paciente.nome ?? 'Paciente',
+        nomePaciente: contextoAtualizado.nome_paciente ?? 'Paciente',
         telefonePaciente: telefone,
       });
 

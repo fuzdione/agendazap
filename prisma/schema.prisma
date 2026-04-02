@@ -54,7 +54,7 @@ model Paciente {
   agendamentos Agendamento[]
   conversas    Conversa[]
 
-  @@unique([clinicaId, telefone])
+  @@unique([clinicaId, telefone, nome])
   @@map("pacientes")
 }
 

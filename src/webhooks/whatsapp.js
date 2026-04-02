@@ -73,94 +73,95 @@ export async function whatsappWebhookRoutes(fastify) {
       tipo: isTextMessage ? 'texto' : 'mídia',
     });
 
-    try {
-      // Identifica a clínica pelo nome da instância (que é o telefone da clínica)
-      const clinica = await prisma.clinica.findFirst({
-        where: { telefoneWpp: instanceName, ativo: true },
-      });
+    // Responde 200 IMEDIATAMENTE para a Evolution API não retentar.
+    // O processamento pesado (Google Calendar + IA + envio) acontece em background.
+    reply.status(200).send({ received: true });
 
-      if (!clinica) {
-        request.log.warn(`Nenhuma clínica encontrada para a instância: ${instanceName}`);
-        return reply.status(200).send({ received: true });
-      }
+    // Processa a mensagem de forma assíncrona
+    setImmediate(async () => {
+      try {
+        // Identifica a clínica pelo nome da instância (que é o telefone da clínica)
+        const clinica = await prisma.clinica.findFirst({
+          where: { telefoneWpp: instanceName, ativo: true },
+        });
 
-      // Se não for mensagem de texto, responde avisando a limitação
-      if (!isTextMessage) {
-        await sendTextMessage(
-          instanceName,
-          remoteJid,
-          'Desculpe, por enquanto só consigo ler mensagens de texto 😊'
-        );
-        return reply.status(200).send({ received: true });
-      }
+        if (!clinica) {
+          fastify.log.warn(`Nenhuma clínica encontrada para a instância: ${instanceName}`);
+          return;
+        }
 
-      // Busca ou cria o paciente para poder salvar a mensagem de entrada
-      let paciente = await prisma.paciente.findUnique({
-        where: {
-          clinicaId_telefone: {
-            clinicaId: clinica.id,
-            telefone: telefoneRemetente,
-          },
-        },
-      });
+        // Se não for mensagem de texto, responde avisando a limitação
+        if (!isTextMessage) {
+          await sendTextMessage(
+            instanceName,
+            remoteJid,
+            'Desculpe, por enquanto só consigo ler mensagens de texto 😊'
+          );
+          return;
+        }
 
-      if (!paciente) {
-        paciente = await prisma.paciente.create({
+        // Busca ou cria o paciente para poder salvar a mensagem de entrada
+        let paciente = await prisma.paciente.findFirst({
+          where: { clinicaId: clinica.id, telefone: telefoneRemetente },
+          orderBy: { createdAt: 'asc' },
+        });
+
+        if (!paciente) {
+          paciente = await prisma.paciente.create({
+            data: {
+              clinicaId: clinica.id,
+              telefone: telefoneRemetente,
+            },
+          });
+        }
+
+        // Salva a mensagem recebida (entrada) antes de processar
+        await prisma.conversa.create({
           data: {
             clinicaId: clinica.id,
+            pacienteId: paciente.id,
             telefone: telefoneRemetente,
+            direcao: 'entrada',
+            mensagem: textoMensagem,
           },
         });
+
+        // Chama o orquestrador de conversa com IA
+        let resposta;
+        try {
+          resposta = await handleIncomingMessage(clinica.id, telefoneRemetente, textoMensagem, clinica);
+        } catch (iaErr) {
+          fastify.log.error({ msg: 'Erro no processamento pela IA', error: iaErr.message });
+          const telefoneClinica = clinica.telefone ?? '';
+          resposta = telefoneClinica
+            ? `Desculpe, tive um probleminha técnico. Pode repetir sua mensagem? Se preferir, ligue para ${telefoneClinica}.`
+            : 'Desculpe, tive um probleminha técnico. Pode repetir sua mensagem? 🙏';
+        }
+
+        await sendTextMessage(instanceName, remoteJid, resposta);
+
+        // Recarrega o paciente — conversationService pode ter atualizado o nome
+        const pacienteAtualizado = await prisma.paciente.findFirst({
+          where: { clinicaId: clinica.id, telefone: telefoneRemetente },
+          orderBy: { createdAt: 'asc' },
+        });
+
+        // Salva a mensagem enviada (saída)
+        await prisma.conversa.create({
+          data: {
+            clinicaId: clinica.id,
+            pacienteId: (pacienteAtualizado ?? paciente).id,
+            telefone: telefoneRemetente,
+            direcao: 'saida',
+            mensagem: resposta,
+          },
+        });
+
+        fastify.log.info(`Resposta enviada para ${telefoneRemetente} — clínica: ${clinica.nome}`);
+
+      } catch (err) {
+        fastify.log.error({ msg: 'Erro ao processar mensagem em background', error: err.message });
       }
-
-      // Salva a mensagem recebida (entrada) antes de processar
-      await prisma.conversa.create({
-        data: {
-          clinicaId: clinica.id,
-          pacienteId: paciente.id,
-          telefone: telefoneRemetente,
-          direcao: 'entrada',
-          mensagem: textoMensagem,
-        },
-      });
-
-      // Chama o orquestrador de conversa com IA
-      let resposta;
-      try {
-        resposta = await handleIncomingMessage(clinica.id, telefoneRemetente, textoMensagem, clinica);
-      } catch (iaErr) {
-        request.log.error({ msg: 'Erro no processamento pela IA', error: iaErr.message });
-        const telefoneClinica = clinica.telefone ?? '';
-        resposta = telefoneClinica
-          ? `Desculpe, tive um probleminha técnico. Pode repetir sua mensagem? Se preferir, ligue para ${telefoneClinica}.`
-          : 'Desculpe, tive um probleminha técnico. Pode repetir sua mensagem? 🙏';
-      }
-
-      await sendTextMessage(instanceName, remoteJid, resposta);
-
-      // Recarrega o paciente — conversationService pode ter atualizado o nome
-      const pacienteAtualizado = await prisma.paciente.findUnique({
-        where: { clinicaId_telefone: { clinicaId: clinica.id, telefone: telefoneRemetente } },
-      });
-
-      // Salva a mensagem enviada (saída)
-      await prisma.conversa.create({
-        data: {
-          clinicaId: clinica.id,
-          pacienteId: (pacienteAtualizado ?? paciente).id,
-          telefone: telefoneRemetente,
-          direcao: 'saida',
-          mensagem: resposta,
-        },
-      });
-
-      request.log.info(`Resposta enviada para ${telefoneRemetente} — clínica: ${clinica.nome}`);
-
-    } catch (err) {
-      request.log.error({ msg: 'Erro ao processar webhook', error: err.message });
-      // Sempre retorna 200 para a Evolution API não ficar reenviando o mesmo evento
-    }
-
-    return reply.status(200).send({ received: true });
+    });
   });
 }
