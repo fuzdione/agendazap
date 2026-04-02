@@ -44,8 +44,9 @@ export async function devSimulateRoutes(fastify) {
     }
 
     // Busca ou cria o paciente
-    let paciente = await prisma.paciente.findUnique({
-      where: { clinicaId_telefone: { clinicaId: clinica.id, telefone } },
+    let paciente = await prisma.paciente.findFirst({
+      where: { clinicaId: clinica.id, telefone },
+      orderBy: { createdAt: 'asc' },
     });
 
     if (!paciente) {
@@ -77,8 +78,9 @@ export async function devSimulateRoutes(fastify) {
     }
 
     // Recarrega o paciente (conversationService pode ter atualizado o nome)
-    const pacienteAtualizado = await prisma.paciente.findUnique({
-      where: { clinicaId_telefone: { clinicaId: clinica.id, telefone } },
+    const pacienteAtualizado = await prisma.paciente.findFirst({
+      where: { clinicaId: clinica.id, telefone },
+      orderBy: { createdAt: 'asc' },
     });
 
     // Salva resposta de saída (igual ao webhook real)
@@ -134,8 +136,9 @@ export async function devSimulateRoutes(fastify) {
     }
 
     // Remove agendamentos de teste deste telefone
-    const paciente = await prisma.paciente.findUnique({
-      where: { clinicaId_telefone: { clinicaId: clinica.id, telefone } },
+    const paciente = await prisma.paciente.findFirst({
+      where: { clinicaId: clinica.id, telefone },
+      orderBy: { createdAt: 'asc' },
     });
 
     let agendamentosRemovidos = 0;
@@ -174,8 +177,9 @@ export async function devSimulateRoutes(fastify) {
       where: { telefone_clinicaId: { telefone, clinicaId: clinica.id } },
     });
 
-    const paciente = await prisma.paciente.findUnique({
-      where: { clinicaId_telefone: { clinicaId: clinica.id, telefone } },
+    const paciente = await prisma.paciente.findFirst({
+      where: { clinicaId: clinica.id, telefone },
+      orderBy: { createdAt: 'asc' },
     });
 
     const ultimasMensagens = await prisma.conversa.findMany({
