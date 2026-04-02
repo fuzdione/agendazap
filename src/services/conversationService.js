@@ -228,6 +228,10 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
 
   // 8. Processa o JSON de controle retornado pelo Claude
 
+  // Ponto 1: log do controle para rastrear acao e dados_extraidos em produção
+  console.log(`[controle] telefone=${telefone} acao=${controle.acao} novo_estado=${controle.novo_estado} confianca=${controle.confianca}`);
+  console.log(`[controle] dados_extraidos=${JSON.stringify(controle.dados_extraidos)}`);
+
   // 8a. Atualiza o estado da conversa com os novos dados extraídos
   const contextoAtualizado = await atualizarEstadoConversa(
     clinicaId,
@@ -237,11 +241,21 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
     estadoConversa.contextoJson ?? {}
   );
 
-  // 8b. Se a ação for criar agendamento e os dados estiverem completos, verifica conflito e cria
-  // Declarada aqui para permitir early return no caso de conflito de horário
+  // 8b. Normaliza a ação: se há agendamento_id no contexto e dados completos, é sempre remarcação
+  // Corrige o caso em que o modelo retorna criar_agendamento num fluxo de remarcação
+  let acaoEfetiva = controle.acao;
+  if (
+    acaoEfetiva === 'criar_agendamento' &&
+    contextoAtualizado.agendamento_id &&
+    dadosAgendamentoCompletos(contextoAtualizado)
+  ) {
+    console.warn(`[controle] acao normalizada: criar_agendamento → remarcar_agendamento (agendamento_id=${contextoAtualizado.agendamento_id})`);
+    acaoEfetiva = 'remarcar_agendamento';
+  }
+
   let respostaFinal = mensagemParaPaciente;
 
-  if (controle.acao === 'criar_agendamento' && dadosAgendamentoCompletos(contextoAtualizado)) {
+  if (acaoEfetiva === 'criar_agendamento' && dadosAgendamentoCompletos(contextoAtualizado)) {
     const profissional = profissionais.find((p) => p.id === contextoAtualizado.profissional_id);
 
     // Guarda das: profissional_id pode ter chegado como nome ou UUID inválido
@@ -320,7 +334,10 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
         'Por favor, tente confirmar novamente ou entre em contato com a recepção. 🙏';
     }
 
-  } else if (controle.acao === 'remarcar_agendamento' && dadosAgendamentoCompletos(contextoAtualizado)) {
+  } else if (acaoEfetiva === 'remarcar_agendamento' && dadosAgendamentoCompletos(contextoAtualizado)) {
+    // Ponto 2: log do contexto ao entrar no fluxo de remarcação
+    console.log(`[remarcar_agendamento] contexto=${JSON.stringify(contextoAtualizado)}`);
+
     const profissional = profissionais.find((p) => p.id === contextoAtualizado.profissional_id);
 
     if (!profissional) {
@@ -331,41 +348,46 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
 
     const duracaoMin = profissional.duracaoConsultaMin;
 
-    // Localiza o agendamento a cancelar: pelo ID extraído pelo Claude ou fallback por profissional + telefone
+    // Ponto 2: localiza o agendamento original a cancelar
+    // Prioridade: agendamento_id do contexto (salvo quando Claude identificou qual remarcar)
+    // Fallback: mais recente confirmado do profissional para qualquer paciente deste telefone
     let agendamentoAntigo = null;
     if (contextoAtualizado.agendamento_id) {
       agendamentoAntigo = await prisma.agendamento.findFirst({
         where: { id: contextoAtualizado.agendamento_id, clinicaId },
       });
+      console.log(`[remarcar_agendamento] buscou por agendamento_id=${contextoAtualizado.agendamento_id}: ${agendamentoAntigo ? 'encontrado' : 'não encontrado'}`);
     }
     if (!agendamentoAntigo) {
       agendamentoAntigo = await prisma.agendamento.findFirst({
         where: {
           clinicaId,
-          profissionalId: contextoAtualizado.profissional_id,
+          profissionalId: profissional.id,
           pacienteId: { in: pacientesDoTelefone.map((p) => p.id) },
           status: 'confirmado',
         },
         orderBy: { dataHora: 'asc' },
       });
+      console.log(`[remarcar_agendamento] fallback por profissional: ${agendamentoAntigo ? agendamentoAntigo.id : 'nenhum encontrado'}`);
     }
 
-    // Cancela o agendamento anterior e remove do Google Calendar
+    // Ponto 3: cancela o agendamento anterior com log explícito
     if (agendamentoAntigo) {
       await prisma.agendamento.update({
         where: { id: agendamentoAntigo.id },
         data: { status: 'cancelado' },
       });
+      console.log(`🔄 [remarcar_agendamento] agendamento anterior ${agendamentoAntigo.id} marcado como cancelado`);
       if (agendamentoAntigo.calendarEventId) {
         try {
           await deleteEvent(clinicaId, agendamentoAntigo.profissionalId, agendamentoAntigo.calendarEventId);
+          console.log(`🗑️ [remarcar_agendamento] evento Calendar ${agendamentoAntigo.calendarEventId} removido`);
         } catch (err) {
-          console.error('Erro ao deletar evento antigo na remarcação:', err.message);
+          console.error(`[remarcar_agendamento] falha ao deletar evento Calendar: ${err.message}`);
         }
       }
-      console.log(`🔄 Remarcação: agendamento anterior ${agendamentoAntigo.id} cancelado`);
     } else {
-      console.warn('⚠️ Remarcação: nenhum agendamento anterior encontrado para cancelar');
+      console.warn('[remarcar_agendamento] nenhum agendamento anterior encontrado para cancelar');
     }
 
     // Verifica conflito no novo horário antes de criar
@@ -387,9 +409,11 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
       return respostaFinal;
     }
 
+    // Ponto 4: cria novo agendamento e só confirma sucesso após banco + Calendar OK
     let remarcacaoConcluida = false;
     try {
       const novoAgendamento = await criarAgendamento(clinicaId, paciente, contextoAtualizado, profissional);
+      console.log(`✅ [remarcar_agendamento] novo agendamento criado: ${novoAgendamento.id}`);
       remarcacaoConcluida = true;
 
       const calendarEventId = await createEvent(clinicaId, profissional.id, {
@@ -404,18 +428,23 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
           where: { id: novoAgendamento.id },
           data: { calendarEventId },
         });
+        console.log(`📅 [remarcar_agendamento] evento Calendar criado: ${calendarEventId}`);
       }
     } catch (err) {
-      console.error('[remarcar_agendamento] Falha ao criar novo agendamento:', err.message);
-      console.error('[remarcar_agendamento] Contexto:', JSON.stringify(contextoAtualizado));
+      console.error(`[remarcar_agendamento] falha ao criar novo agendamento: ${err.message}`);
+      console.error(`[remarcar_agendamento] contexto no erro: ${JSON.stringify(contextoAtualizado)}`);
     }
 
+    // Ponto 4: resposta de sucesso enviada ao paciente SOMENTE após confirmação do banco + Calendar
     if (remarcacaoConcluida) {
       await prisma.estadoConversa.update({
         where: { telefone_clinicaId: { telefone, clinicaId } },
         data: { estado: 'inicio', contextoJson: {} },
       });
+      console.log(`[remarcar_agendamento] concluída com sucesso para ${telefone}`);
+      // respostaFinal mantém mensagemParaPaciente (confirmação do Claude)
     } else {
+      // Sobreescreve a mensagem do Claude — não envia "remarcado" se o backend falhou
       respostaFinal =
         'Desculpe, ocorreu um erro ao registrar a remarcação. ' +
         'Por favor, tente novamente ou entre em contato com a recepção. 🙏';
