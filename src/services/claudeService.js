@@ -68,7 +68,7 @@ export function buildSystemPrompt(clinica, profissionais, horariosDisponiveis, e
 
       const diasFormatados = slots.slice(0, MAX_DIAS).map((d) => {
         const [ano, mes, dia] = d.data.split('-');
-        const dataFormatada = `${dia}/${mes}`;
+        const dataFormatada = `${dia}/${mes}/${ano}`;  // ano obrigatório para Claude gerar ISO correto
         const primeiros = d.slots.slice(0, MAX_SLOTS_POR_DIA);
         const extra = d.slots.length - primeiros.length;
         const linhaSlots = primeiros.join(' | ') + (extra > 0 ? ` (+${extra} horários)` : '');
