@@ -4,7 +4,7 @@ import { env } from '../config/env.js';
 const client = new Anthropic({ apiKey: env.CLAUDE_API_KEY });
 
 const MODEL = 'claude-sonnet-4-20250514';
-const MAX_TOKENS = 600;
+const MAX_TOKENS = 1024;
 
 // Timeout de 25 segundos para a chamada à API do Claude
 const API_TIMEOUT_MS = 25_000;

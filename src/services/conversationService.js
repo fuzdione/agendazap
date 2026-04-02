@@ -243,34 +243,53 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
 
   if (controle.acao === 'criar_agendamento' && dadosAgendamentoCompletos(contextoAtualizado)) {
     const profissional = profissionais.find((p) => p.id === contextoAtualizado.profissional_id);
-    const duracaoMin = profissional?.duracaoConsultaMin ?? 30;
 
-    // Verifica race condition: outro paciente pode ter agendado o mesmo horário
-    const temConflito = await checkConflict(
-      clinicaId,
-      contextoAtualizado.profissional_id,
-      contextoAtualizado.data_hora,
-      duracaoMin
-    );
+    // Guarda das: profissional_id pode ter chegado como nome ou UUID inválido
+    if (!profissional) {
+      console.error(`[criar_agendamento] profissional_id inválido: "${contextoAtualizado.profissional_id}" — reiniciando seleção`);
+      await prisma.estadoConversa.update({
+        where: { telefone_clinicaId: { telefone, clinicaId } },
+        data: { estado: 'escolhendo_especialidade', contextoJson: { nome_paciente: contextoAtualizado.nome_paciente } },
+      });
+      respostaFinal = 'Desculpe, tive um problema ao identificar o profissional. Pode me dizer novamente qual especialidade e horário você deseja? 🙏';
+      return respostaFinal;
+    }
 
-    if (temConflito) {
-      // Horário já foi tomado — volta o estado para escolha de horário e avisa
+    // Guarda das: data_hora pode estar em formato não-ISO
+    const dataHoraDate = new Date(contextoAtualizado.data_hora);
+    if (isNaN(dataHoraDate.getTime())) {
+      console.error(`[criar_agendamento] data_hora inválida: "${contextoAtualizado.data_hora}" — reiniciando seleção`);
       await prisma.estadoConversa.update({
         where: { telefone_clinicaId: { telefone, clinicaId } },
         data: { estado: 'escolhendo_horario', contextoJson: { ...contextoAtualizado, data_hora: null } },
       });
+      respostaFinal = 'Desculpe, não consegui interpretar a data escolhida. Pode me informar o dia e horário novamente? 🙏';
+      return respostaFinal;
+    }
 
+    const duracaoMin = profissional.duracaoConsultaMin;
+
+    // Verifica race condition: outro paciente pode ter agendado o mesmo horário
+    const temConflito = await checkConflict(clinicaId, profissional.id, contextoAtualizado.data_hora, duracaoMin);
+
+    if (temConflito) {
+      await prisma.estadoConversa.update({
+        where: { telefone_clinicaId: { telefone, clinicaId } },
+        data: { estado: 'escolhendo_horario', contextoJson: { ...contextoAtualizado, data_hora: null } },
+      });
       respostaFinal =
         'Ops! Esse horário acabou de ser reservado por outro paciente. 😕 ' +
         'Por favor, escolha outro horário na lista que enviei.';
       return respostaFinal;
     }
 
+    let agendamentoCriado = false;
     try {
       const agendamento = await criarAgendamento(clinicaId, paciente, contextoAtualizado, profissional);
+      agendamentoCriado = true;
 
       // Cria o evento correspondente no Google Calendar e salva o ID
-      const calendarEventId = await createEvent(clinicaId, contextoAtualizado.profissional_id, {
+      const calendarEventId = await createEvent(clinicaId, profissional.id, {
         dataHora: contextoAtualizado.data_hora,
         duracaoMin,
         nomePaciente: contextoAtualizado.nome_paciente ?? 'Paciente',
@@ -284,20 +303,33 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
         });
       }
     } catch (err) {
-      // Loga contexto completo para facilitar diagnóstico de problemas com UUIDs ou formato de data
-      console.error('Erro ao criar agendamento:', err.message);
-      console.error('Contexto no momento do erro:', JSON.stringify(contextoAtualizado));
+      console.error('[criar_agendamento] Falha:', err.message);
+      console.error('[criar_agendamento] Contexto:', JSON.stringify(contextoAtualizado));
     }
 
-    // Reseta o estado para início após agendamento concluído
-    await prisma.estadoConversa.update({
-      where: { telefone_clinicaId: { telefone, clinicaId } },
-      data: { estado: 'inicio', contextoJson: {} },
-    });
+    if (agendamentoCriado) {
+      // Reseta o estado para início apenas após sucesso confirmado
+      await prisma.estadoConversa.update({
+        where: { telefone_clinicaId: { telefone, clinicaId } },
+        data: { estado: 'inicio', contextoJson: {} },
+      });
+    } else {
+      // Mantém o estado em confirmando para o paciente poder tentar de novo
+      respostaFinal =
+        'Desculpe, ocorreu um erro ao registrar o agendamento. ' +
+        'Por favor, tente confirmar novamente ou entre em contato com a recepção. 🙏';
+    }
 
   } else if (controle.acao === 'remarcar_agendamento' && dadosAgendamentoCompletos(contextoAtualizado)) {
     const profissional = profissionais.find((p) => p.id === contextoAtualizado.profissional_id);
-    const duracaoMin = profissional?.duracaoConsultaMin ?? 30;
+
+    if (!profissional) {
+      console.error(`[remarcar_agendamento] profissional_id inválido: "${contextoAtualizado.profissional_id}"`);
+      respostaFinal = 'Desculpe, tive um problema ao identificar o profissional. Pode me dizer novamente qual consulta deseja remarcar? 🙏';
+      return respostaFinal;
+    }
+
+    const duracaoMin = profissional.duracaoConsultaMin;
 
     // Localiza o agendamento a cancelar: pelo ID extraído pelo Claude ou fallback por profissional + telefone
     let agendamentoAntigo = null;
@@ -355,10 +387,12 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
       return respostaFinal;
     }
 
+    let remarcacaoConcluida = false;
     try {
       const novoAgendamento = await criarAgendamento(clinicaId, paciente, contextoAtualizado, profissional);
+      remarcacaoConcluida = true;
 
-      const calendarEventId = await createEvent(clinicaId, contextoAtualizado.profissional_id, {
+      const calendarEventId = await createEvent(clinicaId, profissional.id, {
         dataHora: contextoAtualizado.data_hora,
         duracaoMin,
         nomePaciente: contextoAtualizado.nome_paciente ?? 'Paciente',
@@ -372,14 +406,20 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
         });
       }
     } catch (err) {
-      console.error('Erro ao criar novo agendamento na remarcação:', err.message);
-      console.error('Contexto no momento do erro:', JSON.stringify(contextoAtualizado));
+      console.error('[remarcar_agendamento] Falha ao criar novo agendamento:', err.message);
+      console.error('[remarcar_agendamento] Contexto:', JSON.stringify(contextoAtualizado));
     }
 
-    await prisma.estadoConversa.update({
-      where: { telefone_clinicaId: { telefone, clinicaId } },
-      data: { estado: 'inicio', contextoJson: {} },
-    });
+    if (remarcacaoConcluida) {
+      await prisma.estadoConversa.update({
+        where: { telefone_clinicaId: { telefone, clinicaId } },
+        data: { estado: 'inicio', contextoJson: {} },
+      });
+    } else {
+      respostaFinal =
+        'Desculpe, ocorreu um erro ao registrar a remarcação. ' +
+        'Por favor, tente novamente ou entre em contato com a recepção. 🙏';
+    }
   }
 
   // 8c. Se confiança baixa, adiciona sugestão de contato humano ao final da mensagem
