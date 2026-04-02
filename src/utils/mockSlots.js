@@ -42,32 +42,39 @@ function getProximosDiasUteis(quantidade) {
   return dias;
 }
 
+// Intervalo de almoço padrão (minutos desde meia-noite)
+const ALMOCO_INICIO_MIN = 12 * 60; // 12:00
+const ALMOCO_FIM_MIN    = 13 * 60; // 13:00
+
 /**
- * Gera todos os horários possíveis em um dia para uma dada duração de consulta.
+ * Gera todos os horários possíveis em um dia para uma dada duração de consulta,
+ * respeitando o intervalo de almoço e o gap entre consultas.
  * @param {Date} date
- * @param {number} duracaoMin - Duração da consulta em minutos
+ * @param {number} duracaoMin    - Duração da consulta em minutos
+ * @param {number} intervaloGapMin - Gap entre o fim de uma consulta e o início da próxima
  * @returns {string[]} - Array de horários no formato "HH:MM"
  */
-function gerarHorariosNoDia(date, duracaoMin) {
+function gerarHorariosNoDia(date, duracaoMin, intervaloGapMin = 0) {
   const slots = [];
-  let horaAtual = HORA_INICIO;
-  let minutoAtual = 0;
+  const passo = duracaoMin + intervaloGapMin;
+  let minutosCursor = HORA_INICIO * 60;
 
   while (true) {
-    // Verifica se o slot + duração cabem dentro do expediente
-    const minutosTotal = horaAtual * 60 + minutoAtual + duracaoMin;
-    if (minutosTotal > HORA_FIM * 60) break;
+    const minutosFim = minutosCursor + duracaoMin;
 
-    const hora = String(horaAtual).padStart(2, '0');
-    const minuto = String(minutoAtual).padStart(2, '0');
-    slots.push(`${hora}:${minuto}`);
+    // Slot ultrapassa o fim do expediente
+    if (minutosFim > HORA_FIM * 60) break;
 
-    // Avança pelo intervalo da consulta
-    minutoAtual += duracaoMin;
-    if (minutoAtual >= 60) {
-      horaAtual += Math.floor(minutoAtual / 60);
-      minutoAtual = minutoAtual % 60;
+    // Pula slots que se sobrepõem ao intervalo de almoço
+    const sobrepoeAlmoco = minutosCursor < ALMOCO_FIM_MIN && minutosFim > ALMOCO_INICIO_MIN;
+
+    if (!sobrepoeAlmoco) {
+      const hora   = String(Math.floor(minutosCursor / 60)).padStart(2, '0');
+      const minuto = String(minutosCursor % 60).padStart(2, '0');
+      slots.push(`${hora}:${minuto}`);
     }
+
+    minutosCursor += passo;
   }
 
   return slots;

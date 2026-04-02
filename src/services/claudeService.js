@@ -58,13 +58,24 @@ export function buildSystemPrompt(clinica, profissionais, horariosDisponiveis, e
     .join('\n');
 
   // Formata os horários disponíveis por profissional
+  // Limite: 3 dias e 6 horários por dia (WhatsApp-friendly, formato horizontal)
+  const MAX_DIAS = 3;
+  const MAX_SLOTS_POR_DIA = 6;
+
   const listaHorarios = horariosDisponiveis
     .map(({ profissional, slots }) => {
       if (!slots || slots.length === 0) return `  ${profissional.nome}: sem horários disponíveis`;
-      const diasFormatados = slots
-        .map((d) => `    ${d.dia_semana} ${d.data}: ${d.slots.join(', ')}`)
-        .join('\n');
-      return `  ${profissional.nome} (${profissional.especialidade}):\n${diasFormatados}`;
+
+      const diasFormatados = slots.slice(0, MAX_DIAS).map((d) => {
+        const [ano, mes, dia] = d.data.split('-');
+        const dataFormatada = `${dia}/${mes}`;
+        const primeiros = d.slots.slice(0, MAX_SLOTS_POR_DIA);
+        const extra = d.slots.length - primeiros.length;
+        const linhaSlots = primeiros.join(' | ') + (extra > 0 ? ` (+${extra} horários)` : '');
+        return `📅 *${d.dia_semana}, ${dataFormatada}:*\n${linhaSlots}`;
+      }).join('\n\n');
+
+      return `${profissional.nome} (${profissional.especialidade}):\n${diasFormatados}`;
     })
     .join('\n\n');
 

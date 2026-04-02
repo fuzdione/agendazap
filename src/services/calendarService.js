@@ -233,8 +233,13 @@ function gerarSlotsDisponiveis(dataInicio, dataFim, periodosOcupados, duracaoMin
   const horaFimSemana    = config.hora_fim_semana    ?? 18;
   const horaInicioSab    = config.hora_inicio_sabado ?? 8;
   const horaFimSab       = config.hora_fim_sabado    ?? 12;
-  const intervaloMin     = config.intervalo_slots_min ?? duracaoMin;
+  // intervalo_slots_min é o GAP entre consultas (não o passo de geração)
+  const intervaloGapMin  = config.intervalo_slots_min ?? 0;
   const atendeSabado     = config.atende_sabado       ?? false;
+  const intervaloAlmoco  = config.intervalo_almoco ?? { inicio: '12:00', fim: '13:00' };
+
+  // Passo = duração da consulta + gap entre consultas
+  const passoMin = duracaoMin + intervaloGapMin;
 
   // Converte períodos ocupados para objetos Date para comparação eficiente
   const ocupados = periodosOcupados.map((p) => ({
@@ -265,10 +270,11 @@ function gerarSlotsDisponiveis(dataInicio, dataFim, periodosOcupados, duracaoMin
         cursor,
         horaInicio,
         horaFim,
-        intervaloMin,
+        passoMin,
         duracaoMin,
         ocupados,
-        corteAntecedencia
+        corteAntecedencia,
+        intervaloAlmoco
       );
 
       if (slotsNoDia.length > 0) {
@@ -291,18 +297,27 @@ function gerarSlotsDisponiveis(dataInicio, dataFim, periodosOcupados, duracaoMin
 }
 
 /**
- * Gera os slots disponíveis em um único dia, excluindo horários ocupados e passados.
+ * Gera os slots disponíveis em um único dia, excluindo horários ocupados, passados e almoço.
  *
  * @param {Date} date - Data base (hora ignorada)
  * @param {number} horaInicio - Hora de início do expediente (ex: 8)
  * @param {number} horaFim    - Hora de fim do expediente (ex: 18)
- * @param {number} intervaloMin - Intervalo entre slots em minutos
- * @param {number} duracaoMin   - Duração da consulta em minutos
+ * @param {number} passoMin   - Passo entre slots = duração + gap entre consultas
+ * @param {number} duracaoMin - Duração da consulta em minutos
  * @param {Array<{start: Date, end: Date}>} ocupados - Intervalos ocupados
  * @param {Date} corteAntecedencia - Momento mínimo permitido para oferecer slot
+ * @param {{ inicio: string, fim: string }|null} intervaloAlmoco - Ex: { inicio: "12:00", fim: "13:00" }
  * @returns {string[]} Slots livres no formato "HH:MM"
  */
-function gerarSlotsNoDia(date, horaInicio, horaFim, intervaloMin, duracaoMin, ocupados, corteAntecedencia) {
+function gerarSlotsNoDia(date, horaInicio, horaFim, passoMin, duracaoMin, ocupados, corteAntecedencia, intervaloAlmoco) {
+  // Converte intervalo de almoço para minutos (ex: "12:00" → 720)
+  const parseMinutos = (str) => {
+    const [h, m] = str.split(':').map(Number);
+    return h * 60 + m;
+  };
+  const almocoInicioMin = intervaloAlmoco ? parseMinutos(intervaloAlmoco.inicio) : null;
+  const almocoFimMin    = intervaloAlmoco ? parseMinutos(intervaloAlmoco.fim)    : null;
+
   const slots = [];
   let minutosCursor = horaInicio * 60;
 
@@ -312,26 +327,31 @@ function gerarSlotsNoDia(date, horaInicio, horaFim, intervaloMin, duracaoMin, oc
     // Slot ultrapassa o fim do expediente
     if (minutosFim > horaFim * 60) break;
 
-    const slotInicio = new Date(date);
-    slotInicio.setHours(Math.floor(minutosCursor / 60), minutosCursor % 60, 0, 0);
+    // Pula slots que se sobrepõem ao intervalo de almoço
+    const sobrepoeAlmoco = almocoInicioMin !== null &&
+      minutosCursor < almocoFimMin && minutosFim > almocoInicioMin;
 
-    const slotFim = new Date(slotInicio.getTime() + duracaoMin * 60 * 1000);
+    if (!sobrepoeAlmoco) {
+      const slotInicio = new Date(date);
+      slotInicio.setHours(Math.floor(minutosCursor / 60), minutosCursor % 60, 0, 0);
 
-    // Não oferece slot no passado nem com antecedência insuficiente
-    if (slotInicio >= corteAntecedencia) {
-      // Verifica se o slot conflita com algum período ocupado
-      const temConflito = ocupados.some(
-        (o) => slotInicio < o.end && slotFim > o.start
-      );
+      const slotFim = new Date(slotInicio.getTime() + duracaoMin * 60 * 1000);
 
-      if (!temConflito) {
-        const hora   = String(Math.floor(minutosCursor / 60)).padStart(2, '0');
-        const minuto = String(minutosCursor % 60).padStart(2, '0');
-        slots.push(`${hora}:${minuto}`);
+      // Não oferece slot no passado nem com antecedência insuficiente
+      if (slotInicio >= corteAntecedencia) {
+        const temConflito = ocupados.some(
+          (o) => slotInicio < o.end && slotFim > o.start
+        );
+
+        if (!temConflito) {
+          const hora   = String(Math.floor(minutosCursor / 60)).padStart(2, '0');
+          const minuto = String(minutosCursor % 60).padStart(2, '0');
+          slots.push(`${hora}:${minuto}`);
+        }
       }
     }
 
-    minutosCursor += intervaloMin;
+    minutosCursor += passoMin;
   }
 
   return slots;
