@@ -1,6 +1,6 @@
 import { prisma } from '../config/database.js';
 import { buildSystemPrompt, processMessage } from './aiService.js';
-import { getAvailableSlots as getCalendarSlots, createEvent, checkConflict } from './calendarService.js';
+import { getAvailableSlots as getCalendarSlots, createEvent, checkConflict, deleteEvent } from './calendarService.js';
 
 // Quantidade máxima de mensagens do histórico enviadas ao Claude
 const MAX_HISTORY = 10;
@@ -173,13 +173,28 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
     });
   }
 
-  // Busca todos os nomes já cadastrados para este telefone (para confirmação de identidade)
-  const pacientesConhecidos = await prisma.paciente.findMany({
-    where: { clinicaId, telefone, nome: { not: null } },
-    select: { nome: true },
+  // Busca todos os pacientes deste telefone (para nomes conhecidos e agendamentos)
+  const pacientesDoTelefone = await prisma.paciente.findMany({
+    where: { clinicaId, telefone },
+    select: { id: true, nome: true },
     orderBy: { createdAt: 'asc' },
   });
-  const nomesConhecidos = pacientesConhecidos.map((p) => p.nome);
+  const nomesConhecidos = pacientesDoTelefone.map((p) => p.nome).filter(Boolean);
+
+  // Agendamentos confirmados futuros deste telefone — enviados ao Claude para remarkação/cancelamento
+  const agendamentosAtivos = await prisma.agendamento.findMany({
+    where: {
+      clinicaId,
+      pacienteId: { in: pacientesDoTelefone.map((p) => p.id) },
+      status: 'confirmado',
+      dataHora: { gte: new Date() },
+    },
+    include: {
+      profissional: { select: { nome: true, especialidade: true } },
+      paciente: { select: { nome: true } },
+    },
+    orderBy: { dataHora: 'asc' },
+  });
 
   // 2. Busca ou cria o estado da conversa
   const estadoConversa = await getOrCreateEstadoConversa(clinicaId, telefone);
@@ -201,7 +216,7 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
   const horariosDisponiveis = await getAvailableSlots(clinicaId, profissionais);
 
   // 6. Monta o system prompt com todo o contexto
-  const systemPrompt = buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoConversa, nomesConhecidos);
+  const systemPrompt = buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoConversa, nomesConhecidos, agendamentosAtivos);
 
   // 7. Chama o Claude para interpretar a mensagem e gerar a resposta
   const { mensagemParaPaciente, controle } = await processMessage(
@@ -279,16 +294,121 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
       where: { telefone_clinicaId: { telefone, clinicaId } },
       data: { estado: 'inicio', contextoJson: {} },
     });
+
+  } else if (controle.acao === 'remarcar_agendamento' && dadosAgendamentoCompletos(contextoAtualizado)) {
+    const profissional = profissionais.find((p) => p.id === contextoAtualizado.profissional_id);
+    const duracaoMin = profissional?.duracaoConsultaMin ?? 30;
+
+    // Localiza o agendamento a cancelar: pelo ID extraído pelo Claude ou fallback por profissional + telefone
+    let agendamentoAntigo = null;
+    if (contextoAtualizado.agendamento_id) {
+      agendamentoAntigo = await prisma.agendamento.findFirst({
+        where: { id: contextoAtualizado.agendamento_id, clinicaId },
+      });
+    }
+    if (!agendamentoAntigo) {
+      agendamentoAntigo = await prisma.agendamento.findFirst({
+        where: {
+          clinicaId,
+          profissionalId: contextoAtualizado.profissional_id,
+          pacienteId: { in: pacientesDoTelefone.map((p) => p.id) },
+          status: 'confirmado',
+        },
+        orderBy: { dataHora: 'asc' },
+      });
+    }
+
+    // Cancela o agendamento anterior e remove do Google Calendar
+    if (agendamentoAntigo) {
+      await prisma.agendamento.update({
+        where: { id: agendamentoAntigo.id },
+        data: { status: 'cancelado' },
+      });
+      if (agendamentoAntigo.calendarEventId) {
+        try {
+          await deleteEvent(clinicaId, agendamentoAntigo.profissionalId, agendamentoAntigo.calendarEventId);
+        } catch (err) {
+          console.error('Erro ao deletar evento antigo na remarcação:', err.message);
+        }
+      }
+      console.log(`🔄 Remarcação: agendamento anterior ${agendamentoAntigo.id} cancelado`);
+    } else {
+      console.warn('⚠️ Remarcação: nenhum agendamento anterior encontrado para cancelar');
+    }
+
+    // Verifica conflito no novo horário antes de criar
+    const temConflito = await checkConflict(
+      clinicaId,
+      contextoAtualizado.profissional_id,
+      contextoAtualizado.data_hora,
+      duracaoMin
+    );
+
+    if (temConflito) {
+      await prisma.estadoConversa.update({
+        where: { telefone_clinicaId: { telefone, clinicaId } },
+        data: { estado: 'escolhendo_horario', contextoJson: { ...contextoAtualizado, data_hora: null } },
+      });
+      respostaFinal =
+        'Ops! Esse horário acabou de ser reservado por outro paciente. 😕 ' +
+        'Por favor, escolha outro horário na lista que enviei.';
+      return respostaFinal;
+    }
+
+    try {
+      const novoAgendamento = await criarAgendamento(clinicaId, paciente, contextoAtualizado, profissional);
+
+      const calendarEventId = await createEvent(clinicaId, contextoAtualizado.profissional_id, {
+        dataHora: contextoAtualizado.data_hora,
+        duracaoMin,
+        nomePaciente: contextoAtualizado.nome_paciente ?? 'Paciente',
+        telefonePaciente: telefone,
+      });
+
+      if (calendarEventId) {
+        await prisma.agendamento.update({
+          where: { id: novoAgendamento.id },
+          data: { calendarEventId },
+        });
+      }
+    } catch (err) {
+      console.error('Erro ao criar novo agendamento na remarcação:', err.message);
+      console.error('Contexto no momento do erro:', JSON.stringify(contextoAtualizado));
+    }
+
+    await prisma.estadoConversa.update({
+      where: { telefone_clinicaId: { telefone, clinicaId } },
+      data: { estado: 'inicio', contextoJson: {} },
+    });
   }
 
   // 8c. Se confiança baixa, adiciona sugestão de contato humano ao final da mensagem
-  if ((controle.confianca ?? 1.0) < 0.6) {
+  /*if ((controle.confianca ?? 1.0) < 0.6) {
     const telefoneClinica = clinica.telefone ?? '';
     const sufixo = telefoneClinica
       ? `\n\nSe preferir, ligue para ${telefoneClinica} para falar com nossa recepção.`
       : '\n\nSe preferir, entre em contato com nossa recepção pelo telefone da clínica.';
     respostaFinal = respostaFinal + sufixo;
-  }
+  }*/
+
+    // 8c. Se confiança baixa, adiciona sugestão de contato humano ao final da mensagem
+    if ((controle.confianca ?? 1.0) < 0.6) {
+      const telefoneClinica = clinica.telefone ?? '';
+
+      // Evita duplicar mensagem de contato caso a IA já tenha incluído
+      const jaTemContato =
+        respostaFinal.toLowerCase().includes('recepção') ||
+        respostaFinal.toLowerCase().includes('ligue') ||
+        respostaFinal.toLowerCase().includes('telefone');
+
+      if (!jaTemContato) {
+        const sufixo = telefoneClinica
+          ? `\n\nSe preferir, ligue para ${telefoneClinica} para falar com nossa recepção.`
+          : '\n\nSe preferir, entre em contato com nossa recepção pelo telefone da clínica.';
+
+        respostaFinal += sufixo;
+      }
+    }
 
   return respostaFinal;
 }

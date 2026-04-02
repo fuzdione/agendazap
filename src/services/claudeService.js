@@ -51,7 +51,7 @@ function extractPatientMessage(text) {
  * @param {object} estadoConversa - Registro atual de estado_conversa (pode ser null)
  * @returns {string}
  */
-export function buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoConversa, nomesConhecidos = []) {
+export function buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoConversa, nomesConhecidos = [], agendamentos = []) {
   // Formata a lista de profissionais e especialidades — UUID incluído para extração correta pelo modelo
   const listaProfissionais = profissionais
     .map((p, i) => `  ${i + 1}. ${p.nome} — ${p.especialidade} (consulta de ${p.duracaoConsultaMin} min) [id: ${p.id}]`)
@@ -84,6 +84,17 @@ export function buildSystemPrompt(clinica, profissionais, horariosDisponiveis, e
     timeZone: 'America/Sao_Paulo',
     weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric',
   });
+
+  // Lista de agendamentos confirmados futuros deste telefone (para remarkação/cancelamento)
+  const listaAgendamentos = agendamentos.length > 0
+    ? agendamentos.map((a) => {
+        const dtBrasilia = new Date(a.dataHora).toLocaleString('pt-BR', {
+          timeZone: 'America/Sao_Paulo',
+          weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+        });
+        return `  - ID: ${a.id} | ${a.paciente.nome} | ${a.profissional.nome} (${a.profissional.especialidade}) | ${dtBrasilia}`;
+      }).join('\n')
+    : '  (nenhum agendamento futuro)';
 
   // Estado atual e contexto acumulado da conversa
   const estadoAtual = estadoConversa?.estado ?? 'inicio';
@@ -124,6 +135,9 @@ ${listaProfissionais || '  (nenhum profissional cadastrado)'}
 ## HORÁRIOS DISPONÍVEIS
 ${listaHorarios || '  (sem horários disponíveis no momento)'}
 
+## AGENDAMENTOS CONFIRMADOS DESTE TELEFONE
+${listaAgendamentos}
+
 ## ESTADO ATUAL DA CONVERSA
 Estado: ${estadoAtual}
 Contexto acumulado:
@@ -145,15 +159,17 @@ O JSON deve seguir exatamente este formato:
     "especialidade": "string ou null",
     "profissional_id": "UUID do profissional ou null",
     "data_hora": "ISO string (ex: 2026-03-30T09:00:00-03:00) ou null",
-    "nome_paciente": "string ou null"
+    "nome_paciente": "string ou null",
+    "agendamento_id": "UUID do agendamento a remarcar/cancelar (da lista acima) ou null"
   },
-  "acao": "nenhuma|criar_agendamento|cancelar_agendamento",
+  "acao": "nenhuma|criar_agendamento|remarcar_agendamento|cancelar_agendamento",
   "confianca": 0.0
 }
 </json>
 
 Regras para o JSON:
 - "acao" deve ser "criar_agendamento" APENAS quando o paciente confirmou explicitamente E todos os campos dados_extraidos estão preenchidos.
+- "acao" deve ser "remarcar_agendamento" quando o paciente quer mudar data/hora de uma consulta existente E já confirmou o novo horário. Preencha "agendamento_id" com o ID da consulta a cancelar.
 - "confianca" é um número entre 0.0 e 1.0 indicando sua certeza sobre a interpretação da mensagem.
 - Preserve os dados já extraídos em turnos anteriores (disponíveis no contexto acumulado acima).
 - Se o paciente escolher por número ou abreviação, resolva para o nome/id correto.`;
