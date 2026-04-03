@@ -241,16 +241,19 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
     estadoConversa.contextoJson ?? {}
   );
 
-  // 8b. Normaliza a ação: se há agendamento_id no contexto e dados completos, é sempre remarcação
-  // Corrige o caso em que o modelo retorna criar_agendamento num fluxo de remarcação
+  // 8b. Normaliza a ação: se há sinal de remarcação e dados completos, força remarcar_agendamento
+  // Cobre dois casos:
+  //   (a) modelo retornou criar_agendamento mas agendamento_id está no contexto acumulado
+  //   (b) modelo declarou intencao=remarcar mas usou criar_agendamento por erro
   let acaoEfetiva = controle.acao;
-  if (
-    acaoEfetiva === 'criar_agendamento' &&
-    contextoAtualizado.agendamento_id &&
-    dadosAgendamentoCompletos(contextoAtualizado)
-  ) {
-    console.warn(`[controle] acao normalizada: criar_agendamento → remarcar_agendamento (agendamento_id=${contextoAtualizado.agendamento_id})`);
-    acaoEfetiva = 'remarcar_agendamento';
+  if (acaoEfetiva === 'criar_agendamento' && dadosAgendamentoCompletos(contextoAtualizado)) {
+    if (contextoAtualizado.agendamento_id) {
+      console.warn(`[controle] acao normalizada: criar_agendamento → remarcar_agendamento (agendamento_id=${contextoAtualizado.agendamento_id})`);
+      acaoEfetiva = 'remarcar_agendamento';
+    } else if (controle.intencao === 'remarcar') {
+      console.warn(`[controle] acao normalizada: criar_agendamento → remarcar_agendamento (intencao=remarcar, sem agendamento_id — usará fallback)`);
+      acaoEfetiva = 'remarcar_agendamento';
+    }
   }
 
   let respostaFinal = mensagemParaPaciente;

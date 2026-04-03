@@ -169,8 +169,10 @@ O JSON deve seguir exatamente este formato:
 </json>
 
 Regras para o JSON:
-- "acao" deve ser "criar_agendamento" APENAS quando o paciente confirmou explicitamente E todos os campos dados_extraidos estão preenchidos.
+- "acao" deve ser "criar_agendamento" APENAS quando o paciente confirmou explicitamente E todos os campos dados_extraidos estão preenchidos E não há agendamento anterior a cancelar.
 - "acao" deve ser "remarcar_agendamento" quando o paciente quer mudar data/hora de uma consulta existente E já confirmou o novo horário. Preencha "agendamento_id" com o ID da consulta a cancelar.
+- CRÍTICO: Assim que identificar intenção de remarcar, preencha "agendamento_id" com o UUID do agendamento da lista acima E "intencao": "remarcar" — faça isso IMEDIATAMENTE, mesmo antes de confirmar o novo horário, e preserve em todos os turnos seguintes.
+- NUNCA use "acao": "criar_agendamento" quando o paciente está remarcando. Se há agendamento a cancelar, use sempre "remarcar_agendamento".
 - "confianca" é um número entre 0.0 e 1.0 indicando sua certeza sobre a interpretação da mensagem.
 - Preserve os dados já extraídos em turnos anteriores (disponíveis no contexto acumulado acima).
 - Se o paciente escolher por número ou abreviação, resolva para o nome/id correto.
