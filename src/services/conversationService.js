@@ -69,9 +69,10 @@ async function getOrCreateEstadoConversa(clinicaId, telefone) {
  */
 async function atualizarEstadoConversa(clinicaId, telefone, novoEstado, dadosExtraidos, contextoAnterior) {
   // Merge: preserva campos já preenchidos, sobrescreve com os novos não-nulos
+  // Trata a string "null" como null real (GPT-4o-mini às vezes retorna a string "null")
   const novoContexto = { ...contextoAnterior };
   for (const [chave, valor] of Object.entries(dadosExtraidos ?? {})) {
-    if (valor !== null && valor !== undefined) {
+    if (valor !== null && valor !== undefined && valor !== 'null') {
       novoContexto[chave] = valor;
     }
   }
@@ -475,6 +476,19 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
         orderBy: { dataHora: 'asc' },
       });
       console.log(`[cancelar_agendamento] fallback por profissional: ${agendamentoAntigo ? agendamentoAntigo.id : 'nenhum encontrado'}`);
+    }
+    if (!agendamentoAntigo) {
+      // Fallback final: qualquer agendamento confirmado deste telefone (mais próximo)
+      agendamentoAntigo = await prisma.agendamento.findFirst({
+        where: {
+          clinicaId,
+          pacienteId: { in: pacientesDoTelefone.map((p) => p.id) },
+          status: 'confirmado',
+          dataHora: { gte: new Date() },
+        },
+        orderBy: { dataHora: 'asc' },
+      });
+      console.log(`[cancelar_agendamento] fallback por telefone: ${agendamentoAntigo ? agendamentoAntigo.id : 'nenhum encontrado'}`);
     }
 
     let cancelamentoConcluido = false;
