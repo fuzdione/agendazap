@@ -452,6 +452,68 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
         'Desculpe, ocorreu um erro ao registrar a remarcação. ' +
         'Por favor, tente novamente ou entre em contato com a recepção. 🙏';
     }
+
+  } else if (acaoEfetiva === 'cancelar_agendamento') {
+    console.log(`[cancelar_agendamento] contexto=${JSON.stringify(contextoAtualizado)}`);
+
+    // Localiza o agendamento a cancelar pelo agendamento_id ou fallback por profissional
+    let agendamentoAntigo = null;
+    if (contextoAtualizado.agendamento_id) {
+      agendamentoAntigo = await prisma.agendamento.findFirst({
+        where: { id: contextoAtualizado.agendamento_id, clinicaId },
+      });
+      console.log(`[cancelar_agendamento] buscou por agendamento_id=${contextoAtualizado.agendamento_id}: ${agendamentoAntigo ? 'encontrado' : 'não encontrado'}`);
+    }
+    if (!agendamentoAntigo && contextoAtualizado.profissional_id) {
+      agendamentoAntigo = await prisma.agendamento.findFirst({
+        where: {
+          clinicaId,
+          profissionalId: contextoAtualizado.profissional_id,
+          pacienteId: { in: pacientesDoTelefone.map((p) => p.id) },
+          status: 'confirmado',
+        },
+        orderBy: { dataHora: 'asc' },
+      });
+      console.log(`[cancelar_agendamento] fallback por profissional: ${agendamentoAntigo ? agendamentoAntigo.id : 'nenhum encontrado'}`);
+    }
+
+    let cancelamentoConcluido = false;
+    if (agendamentoAntigo) {
+      try {
+        await prisma.agendamento.update({
+          where: { id: agendamentoAntigo.id },
+          data: { status: 'cancelado' },
+        });
+        console.log(`✅ [cancelar_agendamento] agendamento ${agendamentoAntigo.id} marcado como cancelado`);
+
+        if (agendamentoAntigo.calendarEventId) {
+          try {
+            await deleteEvent(clinicaId, agendamentoAntigo.profissionalId, agendamentoAntigo.calendarEventId);
+            console.log(`🗑️ [cancelar_agendamento] evento Calendar ${agendamentoAntigo.calendarEventId} removido`);
+          } catch (err) {
+            console.error(`[cancelar_agendamento] falha ao deletar evento Calendar: ${err.message}`);
+          }
+        }
+        cancelamentoConcluido = true;
+      } catch (err) {
+        console.error(`[cancelar_agendamento] falha ao cancelar no banco: ${err.message}`);
+      }
+    } else {
+      console.warn('[cancelar_agendamento] nenhum agendamento encontrado para cancelar');
+    }
+
+    if (cancelamentoConcluido) {
+      await prisma.estadoConversa.update({
+        where: { telefone_clinicaId: { telefone, clinicaId } },
+        data: { estado: 'inicio', contextoJson: {} },
+      });
+      console.log(`[cancelar_agendamento] concluído com sucesso para ${telefone}`);
+      // respostaFinal mantém mensagemParaPaciente (confirmação do Claude)
+    } else {
+      respostaFinal =
+        'Desculpe, não consegui localizar ou cancelar o agendamento. ' +
+        'Por favor, tente novamente ou entre em contato com a recepção. 🙏';
+    }
   }
 
   // 8c. Se confiança baixa, adiciona sugestão de contato humano ao final da mensagem
