@@ -572,7 +572,9 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
   }*/
 
     // 8c. Se confiança baixa, adiciona sugestão de contato humano ao final da mensagem
-    if ((controle.confianca ?? 1.0) < 0.6) {
+    // Não aplica em saudações — confiança baixa é esperada e o fallback poluiria a boas-vindas
+    const intencaoNaoAmbigua = controle.intencao !== 'saudacao' && controle.intencao !== 'outro';
+    if (intencaoNaoAmbigua && (controle.confianca ?? 1.0) < 0.6) {
       const telefoneClinica = clinica.telefone ?? '';
 
       // Evita duplicar mensagem de contato caso a IA já tenha incluído
