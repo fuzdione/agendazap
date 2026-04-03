@@ -352,15 +352,16 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
 
     const duracaoMin = profissional.duracaoConsultaMin;
 
-    // Ponto 2: localiza o agendamento original a cancelar
-    // Prioridade: agendamento_id do contexto (salvo quando Claude identificou qual remarcar)
-    // Fallback: mais recente confirmado do profissional para qualquer paciente deste telefone
+    // Localiza o agendamento original — cadeia de precisão decrescente:
+    // 1. Por agendamento_id exato
+    // 2. Por profissional_id + data_hora da consulta ANTIGA (contexto anterior ao novo horário)
+    // 3. Por profissional_id (qualquer confirmado futuro deste profissional/telefone)
     let agendamentoAntigo = null;
     if (contextoAtualizado.agendamento_id) {
       agendamentoAntigo = await prisma.agendamento.findFirst({
         where: { id: contextoAtualizado.agendamento_id, clinicaId },
       });
-      console.log(`[remarcar_agendamento] buscou por agendamento_id=${contextoAtualizado.agendamento_id}: ${agendamentoAntigo ? 'encontrado' : 'não encontrado'}`);
+      console.log(`[remarcar_agendamento] por agendamento_id=${contextoAtualizado.agendamento_id}: ${agendamentoAntigo ? 'encontrado' : 'não encontrado'}`);
     }
     if (!agendamentoAntigo) {
       agendamentoAntigo = await prisma.agendamento.findFirst({
@@ -369,6 +370,7 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
           profissionalId: profissional.id,
           pacienteId: { in: pacientesDoTelefone.map((p) => p.id) },
           status: 'confirmado',
+          dataHora: { gte: new Date() },
         },
         orderBy: { dataHora: 'asc' },
       });
@@ -457,13 +459,32 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
   } else if (acaoEfetiva === 'cancelar_agendamento') {
     console.log(`[cancelar_agendamento] contexto=${JSON.stringify(contextoAtualizado)}`);
 
-    // Localiza o agendamento a cancelar pelo agendamento_id ou fallback por profissional
+    // Localiza o agendamento a cancelar — cadeia de precisão decrescente:
+    // 1. Por agendamento_id exato
+    // 2. Por profissional_id + data_hora exata (mais preciso quando ID não veio)
+    // 3. Por profissional_id (qualquer confirmado deste profissional/telefone)
+    // Sem fallback genérico "qualquer agendamento" — risco de cancelar o errado
     let agendamentoAntigo = null;
     if (contextoAtualizado.agendamento_id) {
       agendamentoAntigo = await prisma.agendamento.findFirst({
         where: { id: contextoAtualizado.agendamento_id, clinicaId },
       });
-      console.log(`[cancelar_agendamento] buscou por agendamento_id=${contextoAtualizado.agendamento_id}: ${agendamentoAntigo ? 'encontrado' : 'não encontrado'}`);
+      console.log(`[cancelar_agendamento] por agendamento_id=${contextoAtualizado.agendamento_id}: ${agendamentoAntigo ? 'encontrado' : 'não encontrado'}`);
+    }
+    if (!agendamentoAntigo && contextoAtualizado.profissional_id && contextoAtualizado.data_hora) {
+      const dataHoraExata = new Date(contextoAtualizado.data_hora);
+      if (!isNaN(dataHoraExata.getTime())) {
+        agendamentoAntigo = await prisma.agendamento.findFirst({
+          where: {
+            clinicaId,
+            profissionalId: contextoAtualizado.profissional_id,
+            pacienteId: { in: pacientesDoTelefone.map((p) => p.id) },
+            status: 'confirmado',
+            dataHora: dataHoraExata,
+          },
+        });
+        console.log(`[cancelar_agendamento] por profissional+dataHora (${contextoAtualizado.data_hora}): ${agendamentoAntigo ? agendamentoAntigo.id : 'não encontrado'}`);
+      }
     }
     if (!agendamentoAntigo && contextoAtualizado.profissional_id) {
       agendamentoAntigo = await prisma.agendamento.findFirst({
@@ -472,23 +493,11 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
           profissionalId: contextoAtualizado.profissional_id,
           pacienteId: { in: pacientesDoTelefone.map((p) => p.id) },
           status: 'confirmado',
-        },
-        orderBy: { dataHora: 'asc' },
-      });
-      console.log(`[cancelar_agendamento] fallback por profissional: ${agendamentoAntigo ? agendamentoAntigo.id : 'nenhum encontrado'}`);
-    }
-    if (!agendamentoAntigo) {
-      // Fallback final: qualquer agendamento confirmado deste telefone (mais próximo)
-      agendamentoAntigo = await prisma.agendamento.findFirst({
-        where: {
-          clinicaId,
-          pacienteId: { in: pacientesDoTelefone.map((p) => p.id) },
-          status: 'confirmado',
           dataHora: { gte: new Date() },
         },
         orderBy: { dataHora: 'asc' },
       });
-      console.log(`[cancelar_agendamento] fallback por telefone: ${agendamentoAntigo ? agendamentoAntigo.id : 'nenhum encontrado'}`);
+      console.log(`[cancelar_agendamento] por profissional (qualquer futuro): ${agendamentoAntigo ? agendamentoAntigo.id : 'não encontrado'}`);
     }
 
     let cancelamentoConcluido = false;
