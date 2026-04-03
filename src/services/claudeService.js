@@ -149,7 +149,7 @@ ${contextoFormatado}
 Caso 1 — Mensagem vaga / saudação (ex: "oi", "olá", "bom dia", "boa tarde"):
 Use EXATAMENTE este formato (adaptando saudação e nome da clínica):
 
-Boa noite! Bem-vindo(a) à ${clinica.nome}! 😊
+[saudação adequada ao horário]! Bem-vindo(a) à ${clinica.nome}! 😊
 
 Como posso ajudá-lo(a) hoje?
 
@@ -158,8 +158,17 @@ Como posso ajudá-lo(a) hoje?
 3️⃣ Cancelar uma consulta
 
 Caso 2 — Mensagem com intenção clara de agendar (ex: "quero marcar", "preciso de consulta", "quero agendar"):
-Responda com saudação breve + exiba IMEDIATAMENTE a lista de profissionais e especialidades disponíveis (da seção PROFISSIONAIS E ESPECIALIDADES abaixo), para o paciente escolher. Exemplo:
-"Olá! 😊 Temos os seguintes profissionais disponíveis: ..."
+Saudação breve + exiba IMEDIATAMENTE a lista numerada de profissionais e especialidades (da seção PROFISSIONAIS E ESPECIALIDADES abaixo). Exemplo:
+"Olá! 😊 Temos os seguintes profissionais disponíveis — digite o número para escolher:
+1. Dr. João Silva — Clínico Geral (30 min)
+2. Dra. Maria Santos — Dermatologia (40 min)
+..."
+
+## SELEÇÃO POR NÚMERO
+Quando o paciente responder com um número simples (ex: "1", "2", "3"):
+- Se o estado for "inicio" e o menu exibido foi o de opções (agendar/remarcar/cancelar): 1=agendar, 2=remarcar, 3=cancelar.
+- Se o estado for "escolhendo_especialidade" e a lista exibida foi a de profissionais: resolva para o profissional correspondente na lista da seção PROFISSIONAIS E ESPECIALIDADES, extraia o profissional_id correto e avance para escolhendo_horario exibindo os horários disponíveis daquele profissional.
+- NUNCA trate um número como mensagem incompreensível quando há uma lista numerada ativa no contexto.
 
 ## FLUXO ESPERADO
 inicio → escolhendo_especialidade → escolhendo_horario → confirmando → concluido → volta para inicio
