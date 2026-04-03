@@ -4,7 +4,7 @@ import { env } from '../config/env.js';
 const client = new OpenAI({ apiKey: env.OPENAI_API_KEY });
 
 const MODEL = 'gpt-4o-mini';
-const MAX_TOKENS = 600;
+const MAX_TOKENS = 1024;
 const API_TIMEOUT_MS = 25_000;
 
 function extractControlJson(text) {
@@ -43,7 +43,7 @@ export async function processMessage(messageText, systemPrompt, recentHistory, e
   const controleFallback = {
     intencao: 'outro',
     novo_estado: estadoAtual,
-    dados_extraidos: { especialidade: null, profissional_id: null, data_hora: null, nome_paciente: null },
+    dados_extraidos: { especialidade: null, profissional_id: null, data_hora: null, nome_paciente: null, agendamento_id: null },
     acao: 'nenhuma',
     confianca: 0.0,
   };
@@ -64,7 +64,13 @@ export async function processMessage(messageText, systemPrompt, recentHistory, e
 
     const fullText = response.choices?.[0]?.message?.content ?? '';
     const mensagemParaPaciente = extractPatientMessage(fullText);
-    const controle = extractControlJson(fullText) ?? controleFallback;
+    const controleExtraido = extractControlJson(fullText);
+    if (!controleExtraido) {
+      const temTag = /<json>/i.test(fullText);
+      console.error(`[openai] JSON de controle inválido — tag <json> presente: ${temTag}`);
+      console.error(`[openai] Últimos 400 chars: ${fullText.slice(-400)}`);
+    }
+    const controle = controleExtraido ?? controleFallback;
 
     if (!controle.dados_extraidos) controle.dados_extraidos = controleFallback.dados_extraidos;
     if (controle.confianca === undefined) controle.confianca = 0.5;

@@ -236,7 +236,13 @@ export async function processMessage(messageText, systemPrompt, recentHistory, e
     const fullText = response.content?.[0]?.text ?? '';
 
     const mensagemParaPaciente = extractPatientMessage(fullText);
-    const controle = extractControlJson(fullText) ?? controleFallback;
+    const controleExtraido = extractControlJson(fullText);
+    if (!controleExtraido) {
+      const temTag = /<json>/i.test(fullText);
+      console.error(`[claude] JSON de controle inválido — tag <json> presente: ${temTag}`);
+      console.error(`[claude] Últimos 400 chars: ${fullText.slice(-400)}`);
+    }
+    const controle = controleExtraido ?? controleFallback;
 
     // Garante que campos obrigatórios existam mesmo que o Claude não os retorne
     if (!controle.dados_extraidos) controle.dados_extraidos = controleFallback.dados_extraidos;
