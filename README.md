@@ -353,3 +353,7 @@ Clinicas ──< Profissionais
 ```
 
 O sistema é **multi-tenant**: cada clínica é um tenant isolado. A identificação da clínica é feita pelo número de WhatsApp que recebeu a mensagem.
+
+
+
+http://localhost:3000/admin/instance/cf998d93-a395-4a04-9500-91ffb5bb2e56/qrcode

@@ -13,7 +13,7 @@ import { devSimulateRoutes } from './routes/dev/simulate.js';
 const server = Fastify({
   logger: {
     transport: env.NODE_ENV === 'development'
-      ? { target: 'pino-pretty', options: { colorize: true, translateTime: 'HH:MM:ss' } }
+      ? { target: 'pino-pretty', options: { colorize: true, translateTime: 'SYS:HH:MM:ss' } }
       : undefined,
     level: env.NODE_ENV === 'development' ? 'info' : 'warn',
   },
