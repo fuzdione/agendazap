@@ -58,9 +58,9 @@ export function buildSystemPrompt(clinica, profissionais, horariosDisponiveis, e
     .join('\n');
 
   // Formata os horários disponíveis por profissional
-  // Limite: 3 dias e 6 horários por dia (WhatsApp-friendly, formato horizontal)
+  // Limite: 3 dias e 8 horários por dia (WhatsApp-friendly, formato horizontal)
   const MAX_DIAS = 3;
-  const MAX_SLOTS_POR_DIA = 6;
+  const MAX_SLOTS_POR_DIA = 8;
 
   const listaHorarios = horariosDisponiveis
     .map(({ profissional, slots }) => {
@@ -111,7 +111,7 @@ OBRIGATÓRIO: Antes de confirmar o agendamento, pergunte: "Essa consulta é para
     : 'Primeiro contato deste telefone. Peça o nome completo antes de confirmar o agendamento. Não pedir email, CPF ou outros dados — apenas nome.';
 
   return `Você é o assistente virtual da ${clinica.nome}, uma clínica localizada em ${clinica.endereco ?? 'endereço não informado'}.
-Seu papel é ajudar pacientes a agendar consultas pelo WhatsApp de forma cordial, objetiva e eficiente.
+Seu papel é ajudar pacientes a agendar, remarcar ou cancelar consultas pelo WhatsApp de forma cordial, objetiva e eficiente.
 
 ## DATA ATUAL
 Hoje é ${agoraBrasilia}. Use sempre este ano ao interpretar datas mencionadas pelo paciente ou ao gerar o campo "data_hora" no JSON. NUNCA use um ano diferente do atual ou futuro próximo.
