@@ -195,6 +195,8 @@ export async function checkConflict(clinicaId, profissionalId, dataHora, duracao
     const inicio = new Date(dataHora);
     const fim = new Date(inicio.getTime() + duracaoMin * 60 * 1000);
 
+    console.log(`[checkConflict] Verificando no Google Calendar: { calendarId: '${profissional.calendarId}', start: '${inicio.toISOString()}', end: '${fim.toISOString()}' }`);
+
     const { data: freebusyData } = await calendar.freebusy.query({
       requestBody: {
         timeMin: inicio.toISOString(),
@@ -205,6 +207,7 @@ export async function checkConflict(clinicaId, profissionalId, dataHora, duracao
     });
 
     const ocupados = freebusyData.calendars?.[profissional.calendarId]?.busy ?? [];
+    console.log(`[checkConflict] Resposta do Google: ${ocupados.length} período(s) ocupado(s): ${JSON.stringify(ocupados)}`);
 
     // Há conflito se existir algum período ocupado na janela do slot
     return ocupados.length > 0;
@@ -250,13 +253,17 @@ function gerarSlotsDisponiveis(dataInicio, dataFim, periodosOcupados, duracaoMin
   const agora = new Date();
   const corteAntecedencia = new Date(agora.getTime() + ANTECEDENCIA_MINIMA_MS);
 
-  // Itera dia a dia dentro do período
+  // Itera dia a dia dentro do período.
+  // O cursor é inicializado na meia-noite BRT para que toLocaleDateString() e getDay()
+  // reflitam o dia correto no fuso America/Sao_Paulo, independente do fuso do servidor.
   const resultado = [];
-  const cursor = new Date(dataInicio);
-  cursor.setHours(0, 0, 0, 0);
+  const dataBRTInicio = dataInicio.toLocaleDateString('en-CA', { timeZone: TIMEZONE }); // "YYYY-MM-DD"
+  const cursor = new Date(`${dataBRTInicio}T00:00:00-03:00`);
 
   while (cursor < dataFim) {
-    const diaSemana = cursor.getDay(); // 0=Dom, 6=Sab
+    const dataBRT = cursor.toLocaleDateString('en-CA', { timeZone: TIMEZONE }); // "YYYY-MM-DD"
+    // getDay() no ponto de meio-dia BRT garante dia correto mesmo em servidores UTC
+    const diaSemana = new Date(`${dataBRT}T12:00:00-03:00`).getDay(); // 0=Dom, 6=Sab
 
     // Pula domingo e sábado (se não atender)
     const ehSabado  = diaSemana === 6;
@@ -278,10 +285,7 @@ function gerarSlotsDisponiveis(dataInicio, dataFim, periodosOcupados, duracaoMin
       );
 
       if (slotsNoDia.length > 0) {
-        const ano = cursor.getFullYear();
-        const mes = String(cursor.getMonth() + 1).padStart(2, '0');
-        const dia = String(cursor.getDate()).padStart(2, '0');
-
+        const [ano, mes, dia] = dataBRT.split('-');
         resultado.push({
           data: `${ano}-${mes}-${dia}`,
           dia_semana: DIAS_SEMANA[diaSemana],
@@ -290,7 +294,8 @@ function gerarSlotsDisponiveis(dataInicio, dataFim, periodosOcupados, duracaoMin
       }
     }
 
-    cursor.setDate(cursor.getDate() + 1);
+    // Avança 24h (Brasil não tem horário de verão desde 2019, então sempre 24h)
+    cursor.setTime(cursor.getTime() + 24 * 60 * 60 * 1000);
   }
 
   return resultado;
@@ -332,8 +337,12 @@ function gerarSlotsNoDia(date, horaInicio, horaFim, passoMin, duracaoMin, ocupad
       minutosCursor < almocoFimMin && minutosFim > almocoInicioMin;
 
     if (!sobrepoeAlmoco) {
-      const slotInicio = new Date(date);
-      slotInicio.setHours(Math.floor(minutosCursor / 60), minutosCursor % 60, 0, 0);
+      // Constrói o horário do slot em BRT (America/Sao_Paulo = UTC-3, fixo desde 2019).
+      // Usar setHours() causaria bug em servidores UTC: 09:00 local = 09:00 UTC ≠ 09:00 BRT (12:00 UTC).
+      const dataStr = date.toLocaleDateString('en-CA', { timeZone: TIMEZONE }); // "YYYY-MM-DD" em BRT
+      const horaStr = String(Math.floor(minutosCursor / 60)).padStart(2, '0');
+      const minStr  = String(minutosCursor % 60).padStart(2, '0');
+      const slotInicio = new Date(`${dataStr}T${horaStr}:${minStr}:00-03:00`);
 
       const slotFim = new Date(slotInicio.getTime() + duracaoMin * 60 * 1000);
 

@@ -32,6 +32,27 @@ async function getAvailableSlots(clinicaId, profissionais) {
 }
 
 /**
+ * Formata os slots disponíveis de um profissional para exibição no chat.
+ * Retorna string pronta para enviar ao paciente ou mensagem de fallback.
+ * @param {Array} horariosDisponiveis - Resultado de getAvailableSlots
+ * @param {string} profissionalId
+ * @returns {string}
+ */
+function formatarSlotsParaMensagem(horariosDisponiveis, profissionalId) {
+  const entrada = horariosDisponiveis.find((h) => h.profissional.id === profissionalId);
+  const dias = entrada?.slots ?? [];
+  if (dias.length === 0) return 'Sem horários disponíveis no momento. Entre em contato com a recepção.';
+
+  return dias
+    .slice(0, 3)
+    .map((d) => {
+      const [ano, mes, dia] = d.data.split('-');
+      return `📅 ${d.dia_semana}, ${dia}/${mes}/${ano}:\n${d.slots.slice(0, 8).join(' | ')}`;
+    })
+    .join('\n\n');
+}
+
+/**
  * Busca ou cria o registro de estado da conversa para um telefone + clínica.
  *
  * @param {string} clinicaId
@@ -295,9 +316,10 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
         where: { telefone_clinicaId: { telefone, clinicaId } },
         data: { estado: 'escolhendo_horario', contextoJson: { ...contextoAtualizado, data_hora: null } },
       });
+      const slotsFormatados = formatarSlotsParaMensagem(horariosDisponiveis, profissional.id);
       respostaFinal =
-        'Ops! Esse horário acabou de ser reservado por outro paciente. 😕 ' +
-        'Por favor, escolha outro horário na lista que enviei.';
+        'Poxa, esse horário acabou de ser preenchido! 😕 Aqui estão outras opções disponíveis:\n\n' +
+        slotsFormatados;
       return respostaFinal;
     }
 
@@ -409,9 +431,10 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
         where: { telefone_clinicaId: { telefone, clinicaId } },
         data: { estado: 'escolhendo_horario', contextoJson: { ...contextoAtualizado, data_hora: null } },
       });
+      const slotsFormatados = formatarSlotsParaMensagem(horariosDisponiveis, profissional.id);
       respostaFinal =
-        'Ops! Esse horário acabou de ser reservado por outro paciente. 😕 ' +
-        'Por favor, escolha outro horário na lista que enviei.';
+        'Poxa, esse horário acabou de ser preenchido! 😕 Aqui estão outras opções disponíveis:\n\n' +
+        slotsFormatados;
       return respostaFinal;
     }
 
