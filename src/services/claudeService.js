@@ -146,9 +146,10 @@ ${contextoFormatado}
 ## FLUXO ESPERADO
 inicio → escolhendo_especialidade → escolhendo_horario → confirmando → concluido → volta para inicio
 
-## INSTRUÇÃO OBRIGATÓRIA
-Ao final de CADA resposta, inclua um bloco JSON de controle dentro das tags <json></json>.
-Este JSON NÃO será exibido ao paciente — é apenas para controle interno do sistema.
+## INSTRUÇÃO OBRIGATÓRIA — BLOCO JSON DE CONTROLE
+TODA resposta sua DEVE terminar com um bloco JSON entre as tags <json></json>.
+NUNCA omita este bloco — nem em confirmações finais, nem ao encerrar o atendimento, nem em respostas curtas.
+Se o bloco estiver ausente ou malformado, o agendamento NÃO será registrado no sistema, mesmo que você tenha dito "confirmado" ao paciente.
 
 O JSON deve seguir exatamente este formato:
 <json>
@@ -172,7 +173,9 @@ Regras para o JSON:
 - "acao" deve ser "remarcar_agendamento" quando o paciente quer mudar data/hora de uma consulta existente E já confirmou o novo horário. Preencha "agendamento_id" com o ID da consulta a cancelar.
 - "confianca" é um número entre 0.0 e 1.0 indicando sua certeza sobre a interpretação da mensagem.
 - Preserve os dados já extraídos em turnos anteriores (disponíveis no contexto acumulado acima).
-- Se o paciente escolher por número ou abreviação, resolva para o nome/id correto.`;
+- Se o paciente escolher por número ou abreviação, resolva para o nome/id correto.
+
+LEMBRETE FINAL: Sua resposta ainda não está completa até incluir o bloco <json>...</json> no final.`;
 }
 
 /**
