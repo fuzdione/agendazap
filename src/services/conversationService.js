@@ -574,7 +574,7 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
     // 8c. Se confiança muito baixa e paciente já está no meio do fluxo, sugere contato humano.
     // Só aplica a partir de escolhendo_horario para não poluir menus iniciais e seleções por número.
     const estadosMidFlow = ['escolhendo_horario', 'confirmando'];
-    if (estadosMidFlow.includes(estadoAtual) && (controle.confianca ?? 1.0) < 0.5) {
+    if (estadosMidFlow.includes(estadoConversa.estado) && (controle.confianca ?? 1.0) < 0.5) {
       const telefoneClinica = clinica.telefone ?? '';
 
       // Evita duplicar mensagem de contato caso a IA já tenha incluído
