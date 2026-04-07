@@ -2,13 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // --- Mocks ---
 
-// Mock do Redis — evita conexão real nos testes; SET NX retorna 'OK' (primeira vez)
-vi.mock('../../config/redis.js', () => ({
-  redis: {
-    set: vi.fn().mockResolvedValue('OK'),
-  },
-}));
-
 // Mock do banco de dados
 vi.mock('../../config/database.js', () => ({
   prisma: {
@@ -17,7 +10,6 @@ vi.mock('../../config/database.js', () => ({
     },
     paciente: {
       findUnique: vi.fn(),
-      findFirst:  vi.fn(),
       create: vi.fn(),
     },
     conversa: {
@@ -97,9 +89,6 @@ async function callWebhook(payload) {
     payload,
   });
 
-  // Aguarda o setImmediate do handler (processamento em background)
-  await new Promise((resolve) => setImmediate(resolve));
-
   return { status: response.statusCode, body: response.json() };
 }
 
@@ -110,7 +99,6 @@ describe('Webhook /webhook/whatsapp — filtros', () => {
     vi.clearAllMocks();
     prisma.clinica.findFirst.mockResolvedValue(CLINICA_MOCK);
     prisma.paciente.findUnique.mockResolvedValue(PACIENTE_MOCK);
-    prisma.paciente.findFirst.mockResolvedValue(PACIENTE_MOCK);
     prisma.paciente.create.mockResolvedValue(PACIENTE_MOCK);
     prisma.conversa.create.mockResolvedValue({});
     sendTextMessage.mockResolvedValue({});
@@ -151,13 +139,13 @@ describe('Webhook /webhook/whatsapp — filtros', () => {
     expect(prisma.clinica.findFirst).not.toHaveBeenCalled();
   });
 
-  it('ignora mensagens com @lid (Evolution API não suporta envio para esse formato)', async () => {
+  it('processa mensagens com @lid (protocolo novo — não vem duplicado com @s.whatsapp.net)', async () => {
     const { status } = await callWebhook(
       buildPayload({ remoteJid: '276063401816202@lid', text: 'Oi' })
     );
 
     expect(status).toBe(200);
-    expect(prisma.clinica.findFirst).not.toHaveBeenCalled();
+    expect(prisma.clinica.findFirst).toHaveBeenCalled();
   });
 
   it('ignora mensagem de número sem clínica cadastrada', async () => {
@@ -214,7 +202,7 @@ describe('Webhook /webhook/whatsapp — filtros', () => {
   });
 
   it('cria paciente automaticamente se não existir', async () => {
-    prisma.paciente.findFirst.mockResolvedValue(null);
+    prisma.paciente.findUnique.mockResolvedValue(null);
 
     await callWebhook(
       buildPayload({ remoteJid: '5511888880001@s.whatsapp.net', text: 'Primeiro contato' })
@@ -227,7 +215,7 @@ describe('Webhook /webhook/whatsapp — filtros', () => {
   });
 
   it('não cria paciente duplicado se já existir', async () => {
-    prisma.paciente.findFirst.mockResolvedValue(PACIENTE_MOCK);
+    prisma.paciente.findUnique.mockResolvedValue(PACIENTE_MOCK);
 
     await callWebhook(
       buildPayload({ remoteJid: '5511999990001@s.whatsapp.net', text: 'Segunda mensagem' })

@@ -1,5 +1,4 @@
 import { prisma } from '../config/database.js';
-import { redis } from '../config/redis.js';
 import { sendTextMessage } from '../services/whatsappService.js';
 import { handleIncomingMessage } from '../services/conversationService.js';
 import { formatFromWhatsApp } from '../utils/phoneHelper.js';
@@ -28,17 +27,6 @@ export async function whatsappWebhookRoutes(fastify) {
     const message = messageData?.message;
 
     // --- Filtros: ignora mensagens que não devem ser processadas ---
-
-    // Deduplicação: a Evolution API pode entregar o mesmo evento mais de uma vez.
-    // Usamos o key.id (ID único da mensagem no WhatsApp) como chave no Redis com TTL de 30s.
-    const messageId = key?.id;
-    if (messageId) {
-      // SET NX retorna 'OK' apenas se a chave não existia — ou seja, é a primeira vez
-      const inserted = await redis.set(`wh:dedup:${messageId}`, '1', 'NX', 'EX', 30);
-      if (!inserted) {
-        return reply.status(200).send({ received: true });
-      }
-    }
 
     // Ignora mensagens enviadas por nós mesmos
     if (key?.fromMe === true) {
