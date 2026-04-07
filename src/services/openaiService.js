@@ -14,9 +14,12 @@ export { buildSystemPrompt } from './claudeService.js';
  * Substitui a seção de instrução de formato do system prompt pela versão JSON mode.
  * O OpenAI JSON mode exige que a resposta inteira seja um objeto JSON válido, então
  * pedimos {"mensagem_paciente": "...", "controle": {...}} em vez de tags <json>.
+ * Usa o marcador <!-- JSON_SECTION_START --> para localizar o ponto de corte,
+ * tornando a substituição robusta a mudanças no texto do prompt.
  */
 function adaptSystemPromptForJsonMode(systemPrompt) {
-  const idx = systemPrompt.indexOf('## INSTRUÇÃO OBRIGATÓRIA');
+  const MARKER = '<!-- JSON_SECTION_START -->';
+  const idx = systemPrompt.indexOf(MARKER);
   const base = idx >= 0 ? systemPrompt.substring(0, idx) : systemPrompt;
 
   return base + `## INSTRUÇÃO OBRIGATÓRIA — FORMATO DE RESPOSTA
@@ -84,6 +87,7 @@ export async function processMessage(messageText, systemPrompt, recentHistory, e
     const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
     let response;
+    const t0 = Date.now();
     try {
       response = await client.chat.completions.create(
         {
@@ -97,6 +101,7 @@ export async function processMessage(messageText, systemPrompt, recentHistory, e
     } finally {
       clearTimeout(timeoutId);
     }
+    console.log(`[openai] resposta em ${Date.now() - t0}ms`);
 
     const fullText = response.choices?.[0]?.message?.content ?? '{}';
 
