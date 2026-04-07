@@ -122,7 +122,8 @@ export async function processMessage(messageText, systemPrompt, recentHistory, e
     return { mensagemParaPaciente, controle };
 
   } catch (err) {
-    const isTimeout = err.name === 'AbortError';
+    // O SDK OpenAI lança APIUserAbortError (não AbortError) quando o signal é acionado
+    const isTimeout = err.name === 'AbortError' || err.name === 'APIUserAbortError';
     const isRateLimit = err.status === 429;
     const isServerError = err.status >= 500;
 
