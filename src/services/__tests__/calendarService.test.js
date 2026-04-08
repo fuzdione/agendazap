@@ -126,8 +126,8 @@ describe('calendarService — getAvailableSlots com Google Calendar', () => {
     expect(result).toHaveLength(1);
     const { slots } = result[0];
 
-    // Com 30min de duração/intervalo e expediente 08–18, deve ter 20 slots (08:00 a 17:30)
-    expect(slots).toHaveLength(20);
+    // Com 30min de duração/intervalo e expediente 08–18 (com pausa de almoço 12–13), deve ter 18 slots
+    expect(slots).toHaveLength(18);
     expect(slots[0]).toBe('08:00');
     expect(slots[slots.length - 1]).toBe('17:30');
 
@@ -206,8 +206,8 @@ describe('calendarService — getAvailableSlots com Google Calendar', () => {
     const result = await getAvailableSlots(CLINICA_ID, PROFISSIONAL_ID, DATA_INICIO_SEGUNDA, DATA_FIM_SEGUNDA);
     const { slots } = result[0];
 
-    // Com 60min de duração e intervalo (padrão = duracaoMin), gera 10 slots: 08:00–17:00
-    expect(slots).toHaveLength(10);
+    // Com 60min de duração e intervalo (padrão = duracaoMin) e pausa de almoço 12–13, gera 9 slots: 08:00–17:00
+    expect(slots).toHaveLength(9);
     expect(slots[0]).toBe('08:00');
     expect(slots[1]).toBe('09:00');     // segundo slot exatamente 60min depois
     expect(slots[slots.length - 1]).toBe('17:00');

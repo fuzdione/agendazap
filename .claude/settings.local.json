@@ -32,7 +32,24 @@
       "Bash(cmd //c \"taskkill /IM node.exe /F\")",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(find . -not -path */node_modules/* -not -path */.git/* -type f)",
+      "Bash(ls:*)",
+      "Bash(node:*)",
+      "Bash(echo \"Exit: $?\")",
+      "Bash(npm test:*)",
+      "Bash(git checkout:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(docker inspect:*)",
+      "Bash(docker run:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:doc.evolution-api.com)",
+      "Bash(docker build:*)",
+      "Bash(python -m json.tool)",
+      "Bash(grep -E \"\\\\.\\(js|sql|json\\)$\")",
+      "Bash(npx prisma:*)",
+      "Bash(2>&1)",
+      "Bash(npx vitest:*)"
     ]
   }
 }
