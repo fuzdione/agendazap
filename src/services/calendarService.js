@@ -170,6 +170,40 @@ export async function deleteEvent(clinicaId, profissionalId, calendarEventId) {
 }
 
 /**
+ * Busca um evento pelo ID no Google Calendar do profissional.
+ * Usado pelo worker de lembrete para verificar se o horário foi alterado manualmente.
+ *
+ * @param {string} clinicaId
+ * @param {string} profissionalId
+ * @param {string} calendarEventId
+ * @returns {object|null} Objeto do evento do Google Calendar, ou null se não encontrado
+ */
+export async function getEventById(clinicaId, profissionalId, calendarEventId) {
+  if (!calendarEventId) return null;
+
+  const profissional = await prisma.profissional.findUnique({
+    where: { id: profissionalId },
+  });
+
+  if (!profissional?.calendarId) return null;
+
+  try {
+    const auth = await getAuthenticatedClient(clinicaId);
+    const calendar = google.calendar({ version: 'v3', auth });
+
+    const { data: evento } = await calendar.events.get({
+      calendarId: profissional.calendarId,
+      eventId: calendarEventId,
+    });
+
+    return evento;
+  } catch (err) {
+    console.error(`[calendarService] erro ao buscar evento ${calendarEventId}: ${err.message}`);
+    return null;
+  }
+}
+
+/**
  * Verifica se um horário específico ainda está livre no Google Calendar do profissional.
  * Chamada imediatamente antes de confirmar o agendamento para evitar race condition
  * (dois pacientes escolhendo o mesmo horário quase ao mesmo tempo).

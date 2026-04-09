@@ -566,7 +566,61 @@ docker exec agendazap-postgres psql -U agendazap -d agendazap -c "SELECT a.id, p
 
 ---
 
-## 6. TROUBLESHOOTING
+## 6. LEMBRETES AUTOMÁTICOS
+
+### 6.1 Como funciona o sistema de lembretes
+
+- **Cron horário:** a cada 1h o sistema varre agendamentos confirmados nas próximas 23–25h (sexta-feira: 23–73h para cobrir segunda) com `opt_in_lembrete = true` e `lembrete_enviado_at IS NULL`
+- **Envio:** 24h antes da consulta (ou na sexta se o momento cair no fim de semana)
+- **Resposta:** o paciente responde 1 (confirma), 2 (remarca) ou 3 (cancela) — o bot interpreta diretamente sem chamar IA
+- **Não-resposta:** 4h após o lembrete, o estado é resetado para `inicio` automaticamente
+
+---
+
+### 6.2 Verificar lembretes pendentes
+
+```powershell
+docker exec agendazap-postgres psql -U agendazap -d agendazap -c "SELECT a.id, pa.nome AS paciente, pr.nome AS profissional, a.data_hora, a.lembrete_enviado_at, a.reminder_job_id FROM agendamentos a JOIN pacientes pa ON pa.id = a.paciente_id JOIN profissionais pr ON pr.id = a.profissional_id WHERE a.status = 'confirmado' AND a.data_hora > NOW() ORDER BY a.data_hora;"
+```
+
+- `lembrete_enviado_at` preenchido = lembrete já enviado
+- `reminder_job_id` preenchido = job aguardando na fila do Redis
+
+---
+
+### 6.3 Ver opt-in de lembrete dos pacientes
+
+```powershell
+docker exec agendazap-postgres psql -U agendazap -d agendazap -c "SELECT nome, telefone, opt_in_lembrete FROM pacientes ORDER BY created_at DESC LIMIT 20;"
+```
+
+---
+
+### 6.4 Alterar opt-in manualmente (caso necessário)
+
+```powershell
+docker exec agendazap-postgres psql -U agendazap -d agendazap -c "UPDATE pacientes SET opt_in_lembrete = false WHERE telefone = 'NUMERO';"
+```
+
+---
+
+### 6.5 Ver pacientes aguardando resposta ao lembrete
+
+```powershell
+docker exec agendazap-postgres psql -U agendazap -d agendazap -c "SELECT ec.telefone, ec.estado, ec.contexto_json, ec.updated_at FROM estado_conversa ec WHERE ec.estado = 'aguardando_resposta_lembrete';"
+```
+
+---
+
+### 6.6 Resetar paciente preso em aguardando_resposta_lembrete
+
+```powershell
+docker exec agendazap-postgres psql -U agendazap -d agendazap -c "UPDATE estado_conversa SET estado = 'inicio', contexto_json = '{}' WHERE telefone = 'NUMERO' AND estado = 'aguardando_resposta_lembrete';"
+```
+
+---
+
+## 7. TROUBLESHOOTING
 
 ### O bot não responde às mensagens
 
@@ -678,6 +732,38 @@ O campo `reason` na URL de redirecionamento indica a causa:
 | `invalid_grant` | O `code` OAuth expirou ou já foi usado | Acesse `/admin/google/auth/ID` novamente para gerar novo code |
 | `access_denied` | Usuário clicou em "Cancelar" na tela de consentimento | Repita o fluxo e clique em **Permitir** |
 | Erro Prisma `googleRefreshToken` | Prisma Client desatualizado | Rode `npm run db:push` e reinicie o servidor |
+
+---
+
+### Bot enviou muitas mensagens ao subir o servidor
+
+**Causa:** mensagens acumuladas durante downtime foram processadas de uma vez.
+**Prevenção:** o webhook agora ignora mensagens com mais de 30 minutos. Esse comportamento está ativo automaticamente.
+**Se acontecer novamente:** verifique o log do servidor — cada mensagem ignorada aparece como:
+```
+Mensagem ignorada — muito antiga (downtime) | idadeMin: XX
+```
+
+---
+
+### Token do Google Calendar expirou (`invalid_grant`)
+
+**Sintoma:** agendamentos são criados no banco mas não aparecem no Google Calendar. O log mostra:
+```
+[criar_agendamento] Falha: invalid_grant
+```
+
+**Causa:** apps Google em modo "Teste" no Google Cloud têm tokens que expiram a cada 7 dias.
+
+**Solução imediata** — reautorizar pelo browser:
+```
+http://localhost:3000/admin/google/auth/ID_DA_CLINICA
+```
+
+**Solução definitiva** — publicar o app no Google Cloud Console:
+1. Acesse [console.cloud.google.com](https://console.cloud.google.com) → OAuth consent screen
+2. Mude de **Testing** para **In production**
+3. Tokens não expirarão mais em 7 dias
 
 ---
 
@@ -859,6 +945,9 @@ Acesse `http://localhost:5555` e inspecione:
 | Ver conversas (banco) | `npx prisma studio` → tabela `Conversa` |
 | Ver estado das conversas | `docker exec agendazap-postgres psql -U agendazap -d agendazap -c "SELECT telefone, estado, updated_at FROM public.estado_conversa ORDER BY updated_at DESC LIMIT 10;"` |
 | Resetar conversa travada | `docker exec agendazap-postgres psql -U agendazap -d agendazap -c "UPDATE public.estado_conversa SET estado='inicio', contexto_json='{}' WHERE telefone='NUMERO';"` |
+| Lembretes pendentes | `docker exec agendazap-postgres psql -U agendazap -d agendazap -c "SELECT pa.nome, a.data_hora, a.lembrete_enviado_at FROM agendamentos a JOIN pacientes pa ON pa.id=a.paciente_id WHERE a.status='confirmado' AND a.data_hora > NOW() ORDER BY a.data_hora;"` |
+| Pacientes em aguardando lembrete | `docker exec agendazap-postgres psql -U agendazap -d agendazap -c "SELECT telefone, updated_at FROM estado_conversa WHERE estado='aguardando_resposta_lembrete';"` |
+| Reautorizar Google (token expirado) | Abrir no browser: `http://localhost:3000/admin/google/auth/ID_DA_CLINICA` |
 | Status OAuth Google | `curl http://localhost:3000/admin/google/status/ID_DA_CLINICA` |
 | Autorizar Google Calendar | Abrir no browser: `http://localhost:3000/admin/google/auth/ID_DA_CLINICA` |
 | Listar calendários Google | `curl http://localhost:3000/admin/calendars/ID_DA_CLINICA \| Select-Object -ExpandProperty Content` |

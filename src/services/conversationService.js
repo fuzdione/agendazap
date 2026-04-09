@@ -1,6 +1,7 @@
 import { prisma } from '../config/database.js';
 import { buildSystemPrompt, processMessage } from './aiService.js';
 import { getAvailableSlots as getCalendarSlots, createEvent, checkConflict, deleteEvent } from './calendarService.js';
+import { scheduleReminderIfNeeded, cancelReminder } from './reminderService.js';
 
 // Quantidade máxima de mensagens do histórico enviadas ao Claude
 const MAX_HISTORY = 10;
@@ -173,6 +174,132 @@ async function criarAgendamento(clinicaId, paciente, contexto, profissional) {
 }
 
 /**
+ * Interpreta a resposta do paciente ao lembrete automático (estado aguardando_resposta_lembrete).
+ * Não usa IA — interpreta diretamente a opção escolhida no menu numerado.
+ */
+async function handleRespostaLembrete(clinicaId, telefone, mensagemTexto, contexto, paciente, pacientesDoTelefone) {
+  const msg = mensagemTexto.trim().toLowerCase();
+  const agendamentoId = contexto.agendamento_id;
+
+  // Opção 1 — confirmar presença
+  if (['1', 'sim', 'confirmo', 'confirmar'].includes(msg)) {
+    await prisma.estadoConversa.update({
+      where: { telefone_clinicaId: { telefone, clinicaId } },
+      data: { estado: 'inicio', contextoJson: {} },
+    });
+    return 'Ótimo! Te esperamos. 😊';
+  }
+
+  // Opção 2 — remarcar
+  if (['2', 'remarcar'].includes(msg)) {
+    let profissionalId = null;
+    if (agendamentoId) {
+      const agendamento = await prisma.agendamento.findUnique({
+        where: { id: agendamentoId },
+        select: { profissionalId: true },
+      });
+      profissionalId = agendamento?.profissionalId ?? null;
+    }
+
+    await prisma.estadoConversa.update({
+      where: { telefone_clinicaId: { telefone, clinicaId } },
+      data: {
+        estado: 'escolhendo_horario',
+        contextoJson: { agendamento_id: agendamentoId, profissional_id: profissionalId },
+      },
+    });
+
+    // Busca slots disponíveis para o profissional
+    if (profissionalId) {
+      const agora = new Date();
+      const dataFim = new Date(agora.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const slots = await getCalendarSlots(clinicaId, profissionalId, agora, dataFim);
+      const profissional = await prisma.profissional.findUnique({ where: { id: profissionalId } });
+      const slotsMsg = formatarSlotsParaMensagem([{ profissional, slots }], profissionalId);
+      return `Tudo bem! Aqui estão os horários disponíveis:\n\n${slotsMsg}`;
+    }
+
+    return 'Tudo bem! Me diga o novo dia e horário que você prefere. 📅';
+  }
+
+  // Opção 3 — cancelar
+  if (['3', 'cancelar'].includes(msg)) {
+    let cancelado = false;
+    if (agendamentoId) {
+      const agendamento = await prisma.agendamento.findFirst({
+        where: { id: agendamentoId, clinicaId, status: 'confirmado' },
+      });
+
+      if (agendamento) {
+        await prisma.agendamento.update({
+          where: { id: agendamento.id },
+          data: { status: 'cancelado' },
+        });
+        if (agendamento.calendarEventId) {
+          try {
+            await deleteEvent(clinicaId, agendamento.profissionalId, agendamento.calendarEventId);
+          } catch (err) {
+            console.error(`[handleRespostaLembrete] erro ao deletar evento Calendar: ${err.message}`);
+          }
+        }
+        await cancelReminder(agendamento.id);
+        cancelado = true;
+        console.log(`✅ [handleRespostaLembrete] agendamento ${agendamento.id} cancelado via resposta ao lembrete`);
+      }
+    }
+
+    await prisma.estadoConversa.update({
+      where: { telefone_clinicaId: { telefone, clinicaId } },
+      data: { estado: 'inicio', contextoJson: {} },
+    });
+
+    return cancelado
+      ? 'Consulta cancelada com sucesso. Se quiser reagendar, é só falar comigo! 😊'
+      : 'Não encontrei sua consulta para cancelar. Entre em contato com a recepção se precisar de ajuda.';
+  }
+
+  // Resposta não reconhecida
+  return 'Desculpe, não entendi. Responda com 1, 2 ou 3.';
+}
+
+/**
+ * Processa a resposta do paciente à pergunta de opt-in de lembrete,
+ * feita logo após a confirmação do agendamento (estado concluido + aguardando_opt_in).
+ */
+async function handleOptInLembrete(clinicaId, telefone, mensagemTexto, contexto, paciente) {
+  const msg = mensagemTexto.trim().toLowerCase();
+  const agendamentoId = contexto.agendamento_id;
+
+  let optIn = true; // default — mantém opt-in se não reconhecido
+  let resposta = 'Tudo certo! Mantivemos o lembrete ativado. Até logo! 😊';
+
+  if (['1', 'sim', 'quero', 'ok', 's'].some((w) => msg === w || msg.startsWith(w + ' '))) {
+    optIn = true;
+    resposta = 'Ótimo! Você receberá um lembrete 24h antes da consulta. 😊';
+  } else if (['2', 'não', 'nao', 'obrigado', 'n'].some((w) => msg === w || msg.startsWith(w + ' '))) {
+    optIn = false;
+    resposta = 'Entendido! Não enviaremos lembretes. Até logo! 😊';
+  }
+
+  await prisma.paciente.update({
+    where: { id: paciente.id },
+    data: { optInLembrete: optIn },
+  });
+
+  // Agenda o lembrete se opt-in ativo
+  if (agendamentoId) {
+    await scheduleReminderIfNeeded(agendamentoId);
+  }
+
+  await prisma.estadoConversa.update({
+    where: { telefone_clinicaId: { telefone, clinicaId } },
+    data: { estado: 'inicio', contextoJson: {} },
+  });
+
+  return resposta;
+}
+
+/**
  * Orquestrador central do fluxo de conversa.
  * Recebe uma mensagem de texto de um paciente e retorna a resposta do bot.
  *
@@ -220,6 +347,16 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
 
   // 2. Busca ou cria o estado da conversa
   const estadoConversa = await getOrCreateEstadoConversa(clinicaId, telefone);
+
+  // 2a. Tratamento do estado aguardando_resposta_lembrete — interpreta diretamente sem chamar IA
+  if (estadoConversa.estado === 'aguardando_resposta_lembrete') {
+    return handleRespostaLembrete(clinicaId, telefone, mensagemTexto, estadoConversa.contextoJson ?? {}, paciente, pacientesDoTelefone);
+  }
+
+  // 2b. Tratamento do opt-in de lembrete após confirmação de agendamento
+  if (estadoConversa.estado === 'concluido' && estadoConversa.contextoJson?.aguardando_opt_in) {
+    return handleOptInLembrete(clinicaId, telefone, mensagemTexto, estadoConversa.contextoJson, paciente);
+  }
 
   // 3. Busca o histórico recente (últimas N mensagens em ordem cronológica)
   const historico = (await prisma.conversa.findMany({
@@ -324,9 +461,11 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
     }
 
     let agendamentoCriado = false;
+    let agendamentoCriadoId = null;
     try {
       const agendamento = await criarAgendamento(clinicaId, paciente, contextoAtualizado, profissional);
       agendamentoCriado = true;
+      agendamentoCriadoId = agendamento.id;
 
       // Cria o evento correspondente no Google Calendar e salva o ID
       const calendarEventId = await createEvent(clinicaId, profissional.id, {
@@ -348,11 +487,19 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
     }
 
     if (agendamentoCriado) {
-      // Reseta o estado para início apenas após sucesso confirmado
+      // Salva estado concluido aguardando resposta de opt-in de lembrete
       await prisma.estadoConversa.update({
         where: { telefone_clinicaId: { telefone, clinicaId } },
-        data: { estado: 'inicio', contextoJson: {} },
+        data: {
+          estado: 'concluido',
+          contextoJson: { aguardando_opt_in: true, agendamento_id: agendamentoCriadoId },
+        },
       });
+      respostaFinal =
+        mensagemParaPaciente +
+        '\n\nDeseja receber um lembrete automático aqui no WhatsApp 24h antes da consulta?\n' +
+        '1️⃣ Sim, quero o lembrete\n' +
+        '2️⃣ Não, obrigado';
     } else {
       // Mantém o estado em confirmando para o paciente poder tentar de novo
       respostaFinal =
@@ -440,10 +587,12 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
 
     // Ponto 4: cria novo agendamento e só confirma sucesso após banco + Calendar OK
     let remarcacaoConcluida = false;
+    let novoAgendamentoId = null;
     try {
       const novoAgendamento = await criarAgendamento(clinicaId, paciente, contextoAtualizado, profissional);
       console.log(`✅ [remarcar_agendamento] novo agendamento criado: ${novoAgendamento.id}`);
       remarcacaoConcluida = true;
+      novoAgendamentoId = novoAgendamento.id;
 
       const calendarEventId = await createEvent(clinicaId, profissional.id, {
         dataHora: contextoAtualizado.data_hora,
@@ -470,6 +619,15 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
         where: { telefone_clinicaId: { telefone, clinicaId } },
         data: { estado: 'inicio', contextoJson: {} },
       });
+
+      // Cancela lembrete do agendamento anterior e agenda para o novo
+      if (agendamentoAntigo) {
+        await cancelReminder(agendamentoAntigo.id);
+      }
+      if (novoAgendamentoId) {
+        await scheduleReminderIfNeeded(novoAgendamentoId);
+      }
+
       console.log(`[remarcar_agendamento] concluída com sucesso para ${telefone}`);
       // respostaFinal mantém mensagemParaPaciente (confirmação do Claude)
     } else {
@@ -553,6 +711,7 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
         where: { telefone_clinicaId: { telefone, clinicaId } },
         data: { estado: 'inicio', contextoJson: {} },
       });
+      await cancelReminder(agendamentoAntigo.id);
       console.log(`[cancelar_agendamento] concluído com sucesso para ${telefone}`);
       // respostaFinal mantém mensagemParaPaciente (confirmação do Claude)
     } else {

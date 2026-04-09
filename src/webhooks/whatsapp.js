@@ -9,6 +9,10 @@ const WHITELIST = env.TEST_PHONE_WHITELIST
   ? env.TEST_PHONE_WHITELIST.split(',').map((n) => n.trim()).filter(Boolean)
   : [];
 
+// Mensagens mais antigas que este limite são ignoradas ao subir o servidor
+// (evita processar fila acumulada durante downtime)
+const MAX_MESSAGE_AGE_MS = 30 * 60 * 1000; // 30 minutos
+
 /**
  * Registra a rota POST /webhook/whatsapp no servidor Fastify.
  * Esta rota recebe todos os eventos da Evolution API.
@@ -49,6 +53,20 @@ export async function whatsappWebhookRoutes(fastify) {
     if (remoteJid.includes('@lid')) {
       request.log.warn({ msg: 'Ignorado: @lid não suportado pela Evolution API', jid: remoteJid });
       return reply.status(200).send({ received: true });
+    }
+
+    // Ignora mensagens antigas acumuladas durante downtime do servidor
+    const messageTimestamp = messageData?.messageTimestamp;
+    if (messageTimestamp) {
+      const idadeMs = Date.now() - messageTimestamp * 1000;
+      if (idadeMs > MAX_MESSAGE_AGE_MS) {
+        request.log.warn({
+          msg: 'Mensagem ignorada — muito antiga (downtime)',
+          idadeMin: Math.round(idadeMs / 60000),
+          de: formatFromWhatsApp(key?.remoteJid ?? ''),
+        });
+        return reply.status(200).send({ received: true });
+      }
     }
 
     // Extrai o texto da mensagem (apenas texto simples por enquanto)

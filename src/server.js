@@ -9,6 +9,10 @@ import { instanceRoutes } from './routes/admin/instance.js';
 import { googleAuthRoutes } from './routes/admin/googleAuth.js';
 import { professionalsRoutes } from './routes/admin/professionals.js';
 import { devSimulateRoutes } from './routes/dev/simulate.js';
+import { scannerQueue } from './config/queues.js';
+import { sendReminderWorker } from './jobs/sendReminder.js';
+import { checkReminderResponseWorker } from './jobs/checkReminderResponse.js';
+import { reminderScannerWorker } from './jobs/reminderScanner.js';
 
 const server = Fastify({
   logger: {
@@ -71,6 +75,9 @@ await server.register(devSimulateRoutes);
 async function shutdown() {
   console.log('\n🛑 Encerrando servidor...');
   await server.close();
+  await sendReminderWorker.close();
+  await checkReminderResponseWorker.close();
+  await reminderScannerWorker.close();
   await disconnectDatabase();
   redis.disconnect();
   console.log('👋 Servidor encerrado com sucesso');
@@ -89,6 +96,14 @@ try {
   // Diagnóstico de credenciais Google (primeiros 10 chars — nunca loga o valor completo)
   console.log(`🔑 GOOGLE_CLIENT_ID:     ${env.GOOGLE_CLIENT_ID?.slice(0, 10)}...`);
   console.log(`🔑 GOOGLE_CLIENT_SECRET: ${env.GOOGLE_CLIENT_SECRET?.slice(0, 10)}...`);
+
+  // Registra o cron de varredura horária de lembretes
+  // O jobId garante deduplicação — reinicializações não criam jobs duplicados
+  await scannerQueue.add('scan-upcoming', {}, {
+    repeat: { every: 60 * 60 * 1000 }, // a cada 1 hora
+    jobId: 'reminder-scanner',
+  });
+  console.log('⏰ Cron de varredura de lembretes registrado (intervalo: 1h)');
 } catch (err) {
   server.log.error(err);
   process.exit(1);

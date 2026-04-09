@@ -21,6 +21,40 @@ O paciente conversa com um bot inteligente no WhatsApp que agenda consultas sem 
 
 ---
 
+## O que foi implementado — Etapa 5
+
+- **`src/config/queues.js`** — três filas BullMQ:
+  - `remindersQueue` — processa envios de lembrete (3 tentativas, backoff exponencial de 5 min)
+  - `checkResponseQueue` — detecta não-resposta 4h após o lembrete (1 tentativa)
+  - `scannerQueue` — fila do cron de varredura horária
+- **`src/services/reminderService.js`**:
+  - `ajustarParaDiaUtil(dataHoraLembrete)` — se o momento calculado (dataHora - 24h) cair em sábado ou domingo, recua para a sexta-feira anterior mantendo o mesmo horário (fuso `America/Sao_Paulo`)
+  - `scheduleReminderIfNeeded(agendamentoId)` — enfileira job de lembrete se `opt_in_lembrete = true`; só enfileira imediatamente se a consulta ocorre em menos de 25h; caso contrário aguarda o cron horário
+  - `cancelReminder(agendamentoId)` — remove o job da fila pelo `reminderJobId` salvo no banco
+- **`src/services/calendarService.js`** (atualizado): adicionada `getEventById` — busca evento por ID para detectar alterações manuais feitas no Google Calendar pela recepção
+- **`src/jobs/sendReminder.js`** — worker `reminders`:
+  - Hard stop por `status !== 'confirmado'` e `lembreteEnviadoAt !== null` (idempotência)
+  - Verifica horário no Google Calendar antes de enviar — atualiza banco silenciosamente se horário mudou
+  - Envia mensagem com menu de 3 opções (confirmar / remarcar / cancelar)
+  - Atualiza `EstadoConversa` para `aguardando_resposta_lembrete` se paciente não estiver em fluxo ativo
+  - Salva lembrete na tabela `conversas` com `metadata_json: { tipo: 'lembrete', agendamentoId }`
+  - Enfileira job de verificação de resposta com delay de 4h
+- **`src/jobs/checkReminderResponse.js`** — worker `check-response`: reseta `EstadoConversa` para `inicio` se paciente não respondeu em 4h (evita que o estado fique preso)
+- **`src/jobs/reminderScanner.js`** — cron worker `reminder-scanner`: roda a cada 1h; na sexta-feira estende a janela para 73h para cobrir agendamentos de segunda (cujo lembrete seria enviado no domingo → antecipado para sexta); usa `jobId` para deduplicação automática
+- **`src/services/conversationService.js`** (atualizado):
+  - Estado `aguardando_resposta_lembrete`: interpreta diretamente sem chamar IA — "1" confirma, "2" abre fluxo de remarcação existente, "3" aciona cancelamento existente
+  - Após criar agendamento: pergunta sobre opt-in de lembrete e salva estado `concluido` aguardando resposta
+  - `remarcar_agendamento`: cancela lembrete antigo e agenda novo
+  - `cancelar_agendamento`: cancela lembrete do agendamento removido
+- **`src/webhooks/whatsapp.js`** (atualizado): mensagens com mais de 30 minutos são ignoradas — evita processar fila acumulada durante downtime do servidor
+- **`prisma/schema.prisma`** (atualizado):
+  - `Paciente`: coluna `opt_in_lembrete BOOLEAN DEFAULT TRUE`
+  - `Agendamento`: `lembrete_enviado_at TIMESTAMP` (substitui o boolean), `reminder_job_id VARCHAR`
+  - `EstadoBot`: valor `aguardando_resposta_lembrete` adicionado ao enum
+- **`src/server.js`** (atualizado): importa e inicia os 3 workers; registra o cron de varredura horária; fecha workers adequadamente no graceful shutdown
+
+---
+
 ## O que foi implementado — Etapa 4
 
 - **`src/config/google.js`** — cliente OAuth2 do Google:
@@ -353,7 +387,3 @@ Clinicas ──< Profissionais
 ```
 
 O sistema é **multi-tenant**: cada clínica é um tenant isolado. A identificação da clínica é feita pelo número de WhatsApp que recebeu a mensagem.
-
-
-
-http://localhost:3000/admin/instance/cf998d93-a395-4a04-9500-91ffb5bb2e56/qrcode

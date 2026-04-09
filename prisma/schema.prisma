@@ -43,12 +43,13 @@ model Profissional {
 }
 
 model Paciente {
-  id        String   @id @default(uuid())
-  clinicaId String   @map("clinica_id")
-  nome      String?
-  telefone  String
-  email     String?
-  createdAt DateTime @default(now()) @map("created_at")
+  id            String   @id @default(uuid())
+  clinicaId     String   @map("clinica_id")
+  nome          String?
+  telefone      String
+  email         String?
+  optInLembrete Boolean  @default(true) @map("opt_in_lembrete")
+  createdAt     DateTime @default(now()) @map("created_at")
 
   clinica      Clinica       @relation(fields: [clinicaId], references: [id], onDelete: Cascade)
   agendamentos Agendamento[]
@@ -66,9 +67,10 @@ model Agendamento {
   dataHora         DateTime          @map("data_hora")
   duracaoMin       Int               @default(30) @map("duracao_min")
   status           StatusAgendamento @default(confirmado)
-  calendarEventId  String?           @map("calendar_event_id")
-  lembreteEnviado  Boolean           @default(false) @map("lembrete_enviado")
-  createdAt        DateTime          @default(now()) @map("created_at")
+  calendarEventId   String?           @map("calendar_event_id")
+  lembreteEnviadoAt DateTime?         @map("lembrete_enviado_at")
+  reminderJobId     String?           @map("reminder_job_id")
+  createdAt         DateTime          @default(now()) @map("created_at")
 
   clinica      Clinica      @relation(fields: [clinicaId], references: [id], onDelete: Cascade)
   profissional Profissional @relation(fields: [profissionalId], references: [id], onDelete: Cascade)
@@ -124,4 +126,5 @@ enum EstadoBot {
   escolhendo_horario
   confirmando
   concluido
+  aguardando_resposta_lembrete
 }
