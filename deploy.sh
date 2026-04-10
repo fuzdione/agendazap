@@ -20,8 +20,8 @@ source .env 2>/dev/null || true
 DOMAIN="${DOMAIN:-$(grep ADMIN_URL .env | cut -d= -f2 | sed 's|https\?://||')}"
 sed -i "s/SEU_DOMINIO/$DOMAIN/g" nginx/nginx.conf 2>/dev/null || true
 
-echo "==> Build da imagem da aplicação..."
-docker compose -f docker-compose.prod.yml build app
+echo "==> Build das imagens da aplicação..."
+docker compose -f docker-compose.prod.yml build app migrate
 
 echo "==> Subindo serviços de infraestrutura..."
 docker compose -f docker-compose.prod.yml up -d postgres redis
