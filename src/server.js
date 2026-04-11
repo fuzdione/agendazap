@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
+import rateLimit from '@fastify/rate-limit';
 import { env } from './config/env.js';
 import { prisma, connectDatabase, disconnectDatabase } from './config/database.js';
 import { redis, checkRedisConnection } from './config/redis.js';
@@ -31,13 +32,21 @@ const server = Fastify({
 });
 
 // Plugins
+// Extrai só a origem (scheme + host) do ADMIN_URL — o path /painel não é válido como origin CORS
+const adminOrigin = env.ADMIN_URL ? new URL(env.ADMIN_URL).origin : false;
 await server.register(cors, {
-  origin: env.NODE_ENV === 'development' ? true : (env.ADMIN_URL ?? false),
+  origin: env.NODE_ENV === 'development' ? true : (adminOrigin || false),
   credentials: true,
 });
 
 await server.register(jwt, {
   secret: env.JWT_SECRET,
+});
+
+// Rate limiting global — protege especialmente o endpoint de login
+await server.register(rateLimit, {
+  global: false, // aplica só onde explicitamente configurado
+  redis,         // usa Redis para persistir contadores entre instâncias/reinicializações
 });
 
 // Decorator de autenticação — usado como preHandler nas rotas protegidas

@@ -43,7 +43,7 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/painel">
       <AuthProvider>
         <AppRoutes />
       </AuthProvider>

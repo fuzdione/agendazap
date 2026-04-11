@@ -20,6 +20,7 @@ const envSchema = z.object({
   GOOGLE_REDIRECT_URI: z.string().url('GOOGLE_REDIRECT_URI deve ser uma URL válida'),
   JWT_SECRET: z.string().min(16, 'JWT_SECRET deve ter pelo menos 16 caracteres'),
   ADMIN_URL: z.string().url().optional(),
+  SERVER_URL: z.string().url().optional(),
   PORT: z.string().default('3000'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 });

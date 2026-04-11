@@ -7,6 +7,16 @@ import { prisma } from '../../config/database.js';
  */
 export async function authRoutes(fastify) {
   fastify.post('/auth/login', {
+    config: {
+      rateLimit: {
+        max: 10,
+        timeWindow: '1 minute',
+        errorResponseBuilder: () => ({
+          success: false,
+          error: 'Muitas tentativas de login. Aguarde 1 minuto e tente novamente.',
+        }),
+      },
+    },
     schema: {
       body: {
         type: 'object',

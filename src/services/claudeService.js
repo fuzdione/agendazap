@@ -52,6 +52,8 @@ function extractPatientMessage(text) {
  * @returns {string}
  */
 export function buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoConversa, nomesConhecidos = [], agendamentos = []) {
+  // Limita a 3 nomes mais recentes para evitar mensagens longas e confusas ao paciente
+  nomesConhecidos = nomesConhecidos.slice(-3);
   // Formata a lista de profissionais e especialidades — UUID incluído para extração correta pelo modelo
   const listaProfissionais = profissionais
     .map((p, i) => `  ${i + 1}. ${p.nome} — ${p.especialidade} (consulta de ${p.duracaoConsultaMin} min) [id: ${p.id}]`)
@@ -111,8 +113,11 @@ Quando o paciente escolher o horário, faça esta pergunta antes de confirmar:
 - Use "acao": "criar_agendamento" somente depois que nome_paciente estiver definido`
     : 'Primeiro contato deste telefone. Ao escolher o horário, pergunte o nome completo com linguagem de transição (ex: "Ótimo! Para confirmar, qual o seu nome completo?"). Solicite apenas o nome — nada mais é necessário neste momento. Use "acao": "criar_agendamento" somente após receber o nome.';
 
+  const mensagemBoasVindas = clinica.configJson?.mensagem_boas_vindas;
+
   return `Você é o assistente virtual da ${clinica.nome}, uma clínica localizada em ${clinica.endereco ?? 'endereço não informado'}.
 Seu papel é ajudar pacientes a agendar, remarcar ou cancelar consultas pelo WhatsApp de forma cordial, objetiva e eficiente.
+${mensagemBoasVindas ? `\nMensagem de boas-vindas personalizada da clínica (use como referência de tom e saudação):\n"${mensagemBoasVindas}"\n` : ''}
 
 ## DATA ATUAL
 Hoje é ${agoraBrasilia}. Ao interpretar datas mencionadas pelo paciente e ao gerar o campo "data_hora" no JSON, use sempre o ano atual indicado acima.

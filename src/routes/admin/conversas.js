@@ -15,9 +15,8 @@ export async function conversasAdminRoutes(fastify) {
     const clinicaId = request.user.clinicaId;
 
     // Busca a mensagem mais recente de cada telefone
-    // clinicaId vem do JWT (confiável) — uso queryRawUnsafe para evitar o problema
-    // de coerção text→uuid no PostgreSQL com parâmetros posicionais do Prisma.
-    const contatos = await prisma.$queryRawUnsafe(`
+    // Usa $queryRaw com tagged template para passagem segura do parâmetro uuid
+    const contatos = await prisma.$queryRaw`
       SELECT
         c.telefone,
         p.nome,
@@ -26,11 +25,11 @@ export async function conversasAdminRoutes(fastify) {
         COUNT(*)::int                                              AS total
       FROM conversas c
       LEFT JOIN pacientes p ON p.id = c.paciente_id
-      WHERE c.clinica_id = '${clinicaId}'
+      WHERE c.clinica_id = ${clinicaId}::uuid
       GROUP BY c.telefone, p.nome
       ORDER BY ultima_data DESC
       LIMIT 100
-    `);
+    `;
 
     return reply.send({ success: true, data: contatos });
   });
