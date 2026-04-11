@@ -176,13 +176,42 @@ Esperado: `"state": "open"` — significa que o WhatsApp está conectado.
 
 ## ETAPA 6 — Google Calendar (opcional)
 
-Necessário apenas se a clínica quiser que os agendamentos apareçam no Google Calendar.
+Necessário apenas se a clínica quiser que os agendamentos usem a disponibilidade real de cada médico.
+São dois passos obrigatórios — sem ambos, o Google Calendar não é utilizado.
 
+### 6.1 Autorizar a conta Google da clínica
 1. No painel, acesse **Configurações → Google Calendar**
-2. Clique em **Conectar com Google** e autorize
+2. Clique em **Conectar com Google** e autorize com a conta Google que contém as agendas dos médicos
 3. Confirme que o status aparece como **Conectado**
 
-> Se não configurar o Google Calendar, o bot ainda agenda normalmente — apenas usa horários gerados automaticamente com base no horário de funcionamento.
+### 6.2 Vincular cada profissional ao calendário dele
+Após autorizar, cada médico precisa ser associado ao seu calendário específico.
+
+```bash
+TOKEN="..." # obtenha conforme Etapa 4.1
+CLINICA_ID="..." # UUID da clínica
+
+# 1. Lista os calendários disponíveis na conta Google conectada
+curl -s "https://app.meuagendazap.com.br/admin/calendars/$CLINICA_ID" \
+  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+```
+
+A resposta lista os calendários com `id` e `summary` (nome). Anote o `id` do calendário de cada médico.
+
+```bash
+# 2. Vincula o calendário a cada profissional (repita para cada médico)
+curl -s -X PUT \
+  "https://app.meuagendazap.com.br/admin/profissionais/UUID_DO_PROFISSIONAL/calendar" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"calendarId":"ID_DO_CALENDARIO"}'
+```
+
+> O `UUID_DO_PROFISSIONAL` aparece na resposta de `GET /admin/profissionais` ou no painel em **Profissionais**.
+
+**Checkpoint:** após vincular, envie uma mensagem de teste ao bot escolhendo um profissional — os horários exibidos devem refletir a disponibilidade real do Google Calendar, não slots fixos.
+
+> Se não configurar o Google Calendar, o bot ainda agenda normalmente usando horários gerados com base no horário de funcionamento configurado na Etapa 5.2.
 
 ---
 
