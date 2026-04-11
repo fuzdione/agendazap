@@ -12,7 +12,7 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       sessionStorage.clear();
-      window.location.href = '/login';
+      window.location.href = '/painel/login';
     }
     return Promise.reject(error);
   },
