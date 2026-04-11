@@ -159,7 +159,7 @@ export default function Conversas() {
                 <>
                   {paginacao?.total > mensagens.length && (
                     <p className="text-center text-xs text-gray-400 mb-2">
-                      Exibindo as {mensagens.length} mensagens mais recentes de {paginacao.total}
+                      Exibindo as {mensagens.length} mensagens mais recentes de {paginacao.total} — role para cima para ver o histórico completo
                     </p>
                   )}
                   {mensagens.map((msg) => {

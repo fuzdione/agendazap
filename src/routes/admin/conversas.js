@@ -67,9 +67,10 @@ export async function conversasAdminRoutes(fastify) {
 
     const [total, conversas] = await Promise.all([
       prisma.conversa.count({ where }),
+      // Ordena desc para pegar as N mais recentes, depois inverte para exibição cronológica
       prisma.conversa.findMany({
         where,
-        orderBy: { createdAt: 'asc' },
+        orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
         select: {
@@ -80,7 +81,7 @@ export async function conversasAdminRoutes(fastify) {
           createdAt: true,
           paciente: { select: { nome: true } },
         },
-      }),
+      }).then((rows) => rows.reverse()),
     ]);
 
     return reply.send({
