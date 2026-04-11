@@ -79,22 +79,35 @@ npm run db:push
 
 ### 1.5 Popular dados de desenvolvimento
 
+Antes de rodar, confirme que estas variáveis estão preenchidas no `.env`:
+
+| Variável | Descrição |
+|---|---|
+| `CLINIC_PHONE` | Número WhatsApp da clínica (ex: `5561999990001`) — **obrigatório** |
+| `CLINIC_NAME` | Nome da clínica (ex: `Clínica Saúde Plena`) |
+| `ADMIN_EMAIL` | E-mail de acesso ao painel admin |
+| `ADMIN_SENHA` | Senha do painel admin (mín. 6 chars; proibido `admin123` em produção) |
+
 ```powershell
-npm run db:seed
+cd C:\agendaZap\agendazap
+node prisma/seed.js
 ```
 
-**O que faz:** Insere 1 clínica e 3 profissionais de teste no banco.
+**O que faz:** Cria (ou atualiza) a clínica com o `CLINIC_PHONE` do `.env`, o usuário admin e 3 profissionais de exemplo (só insere profissionais se a clínica ainda não tiver nenhum).
 **Resultado esperado:**
 
 ```
 ✅ Seed concluído
    Clínica: Clínica Saúde Plena (ID: xxxxxxxx-...)
+   Admin: admin@clinica.com
    Profissionais: 3 inseridos
 ```
 
+> Seguro de rodar múltiplas vezes — usa `upsert`.
+
 ---
 
-### 1.6 Iniciar o servidor
+### 1.6 Iniciar o servidor backend
 
 ```powershell
 npm run dev
@@ -106,6 +119,28 @@ npm run dev
 ```
 🚀 AgendaZap rodando em http://0.0.0.0:3000
 ```
+
+---
+
+### 1.7 Instalar dependências e iniciar o painel admin
+
+```powershell
+cd C:\agendaZap\agendazap\admin-panel
+npm install
+npm run dev
+```
+
+**O que faz:** Sobe o frontend React com Vite na porta 5175.
+**Resultado esperado:**
+
+```
+  VITE v6.x.x  ready in ...ms
+  ➜  Local:   http://localhost:5175/
+```
+
+Abra `http://localhost:5175` no navegador e faça login com as credenciais definidas em `ADMIN_EMAIL` / `ADMIN_SENHA`.
+
+> O painel só funciona com o servidor backend rodando (passo 1.6). As chamadas de API são proxiadas automaticamente pelo Vite para `localhost:3000`.
 
 ---
 
@@ -154,6 +189,20 @@ npm test
 ```powershell
 npm run test:watch
 ```
+
+---
+
+### 2.4 Iniciar o painel admin
+
+```powershell
+cd C:\agendaZap\agendazap\admin-panel
+npm run dev
+```
+
+**Quando usar:** Para acessar o painel administrativo no browser.
+**URL:** http://localhost:5175
+**Login:** e-mail e senha do `.env` (`ADMIN_EMAIL` / `ADMIN_SENHA`)
+**Terminal:** Deixe este terminal aberto — o Vite exibe erros de build aqui.
 
 ---
 
@@ -555,14 +604,22 @@ docker exec agendazap-postgres psql -U agendazap -d agendazap -c "SELECT a.id, p
 
 ---
 
-### 5.6 IDs dos profissionais de desenvolvimento (seed)
+### 5.6 IDs dos recursos de desenvolvimento (seed)
 
-| Profissional | UUID |
+> Os UUIDs abaixo são do banco de desenvolvimento local. Se você apagou e refez o banco, os IDs mudaram — consulte via Prisma Studio (`npx prisma studio`) ou pelo painel admin.
+
+| Recurso | UUID |
 |---|---|
 | Dr. João Silva | `e9969385-9733-4d03-aee4-87989cfa4d2f` |
 | Dra. Maria Santos | `8cec83b8-3496-4d8c-8468-2bf2bacedfcd` |
 | Dra. Ana Costa | `c4f2d409-cfc6-4bb9-9008-676070182748` |
 | Clínica Saúde Plena | `cf998d93-a395-4a04-9500-91ffb5bb2e56` |
+
+**Verificar IDs pelo banco:**
+```powershell
+docker exec agendazap-postgres psql -U agendazap -d agendazap -c "SELECT id, nome, telefone_wpp FROM clinicas;"
+docker exec agendazap-postgres psql -U agendazap -d agendazap -c "SELECT id, nome FROM profissionais ORDER BY nome;"
+```
 
 ---
 
@@ -616,6 +673,92 @@ docker exec agendazap-postgres psql -U agendazap -d agendazap -c "SELECT ec.tele
 
 ```powershell
 docker exec agendazap-postgres psql -U agendazap -d agendazap -c "UPDATE estado_conversa SET estado = 'inicio', contexto_json = '{}' WHERE telefone = 'NUMERO' AND estado = 'aguardando_resposta_lembrete';"
+```
+
+---
+
+## 8. PAINEL ADMINISTRATIVO
+
+### 8.1 Acessar o painel
+
+1. Certifique-se de que o servidor backend está rodando (`npm run dev` na raiz)
+2. Na pasta `admin-panel`, rode `npm run dev`
+3. Abra **http://localhost:5175** no navegador
+4. Faça login com `ADMIN_EMAIL` e `ADMIN_SENHA` do `.env`
+
+---
+
+### 8.2 Navegar pelas seções
+
+| Seção | O que oferece |
+|---|---|
+| **Dashboard** | Agendamentos do dia e da semana, taxa de confirmação (30 dias), próximos 5 agendamentos com ações rápidas |
+| **Agendamentos** | Listagem com filtros por data, profissional e status; ações por linha (concluir / no-show / cancelar) |
+| **Profissionais** | Criar, editar, desativar profissionais; vincular Google Calendar por profissional |
+| **Configurações** | Horários de funcionamento, mensagem de boas-vindas, telefone de fallback, status WhatsApp e Google Calendar |
+| **Conversas** | Lista de contatos com última mensagem; ao clicar abre o histórico em formato de chat (balões bot/paciente) |
+
+---
+
+### 8.3 Cancelar um agendamento pelo painel
+
+1. Abra a aba **Agendamentos**
+2. Localize o agendamento (use filtros de data ou profissional se necessário)
+3. Clique em **Cancelar** na linha correspondente
+4. O sistema:
+   - Atualiza o status no banco para `cancelado`
+   - Remove o evento do Google Calendar do profissional
+   - Cancela o job de lembrete no BullMQ (se houver)
+
+---
+
+### 8.4 Vincular Google Calendar a um profissional
+
+1. Abra a aba **Profissionais**
+2. Clique no ícone de calendário na linha do profissional
+3. O modal lista os calendários disponíveis na conta Google já conectada
+4. Selecione o calendário desejado e confirme
+
+> Pré-requisito: a clínica precisa ter o Google Calendar autorizado (aba **Configurações** → seção Google Calendar → botão "Autorizar").
+
+---
+
+### 8.5 Verificar/reconectar WhatsApp pelo painel
+
+1. Abra a aba **Configurações**
+2. Seção **WhatsApp** mostra o estado atual: `Conectado` (verde) ou `Desconectado` (vermelho)
+3. Se desconectado, clique em **Gerar QR Code**, escaneie com o celular da clínica e aguarde alguns segundos
+4. Recarregue a página para confirmar o novo status
+
+---
+
+### 8.6 Trocar senha do admin (via banco)
+
+Não há tela de trocar senha no painel — faça via banco:
+
+```powershell
+# Gerar hash bcrypt para a nova senha (rode no terminal da raiz do projeto)
+node -e "import('bcrypt').then(({default:b})=>b.hash('NOVA_SENHA',12).then(console.log))"
+```
+
+```powershell
+# Atualizar no banco
+docker exec agendazap-postgres psql -U agendazap -d agendazap -c "UPDATE usuarios_admin SET senha_hash = 'HASH_GERADO' WHERE email = 'admin@clinica.com';"
+```
+
+---
+
+### 8.7 Criar um segundo usuário admin
+
+```powershell
+node -e "import('bcrypt').then(({default:b})=>b.hash('SENHA',12).then(h=>console.log(h)))"
+```
+
+```powershell
+docker exec agendazap-postgres psql -U agendazap -d agendazap -c "
+INSERT INTO usuarios_admin (id, clinica_id, email, senha_hash)
+VALUES (gen_random_uuid(), 'ID_DA_CLINICA', 'outro@clinica.com', 'HASH');
+"
 ```
 
 ---
@@ -926,22 +1069,24 @@ Acesse `http://localhost:5555` e inspecione:
 
 ## Referência Rápida
 
-| Ação | Comando |
+| Ação | Comando / URL |
 |---|---|
+| **Painel admin** | http://localhost:5175 (login: ADMIN_EMAIL/ADMIN_SENHA) |
+| Iniciar painel admin | `cd admin-panel && npm run dev` |
+| Iniciar servidor bot | `cd C:\agendaZap\agendazap && npm run dev` |
+| Subir infra Docker | `docker compose start` |
+| Parar bot | `taskkill /IM node.exe /F` |
+| Parar tudo | `taskkill /IM node.exe /F && docker compose stop` |
+| Health check | `curl http://localhost:3000/health` |
+| Rodar testes | `npm test` |
 | Simular mensagem (dev) | `Invoke-WebRequest -Uri "http://localhost:3000/dev/simulate" -Method POST -ContentType "application/json" -Body '{"phone":"5561999990002","message":"Oi"}' \| Select-Object -ExpandProperty Content` |
 | Ver estado simulação (dev) | `Invoke-WebRequest -Uri "http://localhost:3000/dev/simulate/state/5561999990002" -Method GET \| Select-Object -ExpandProperty Content` |
 | Resetar simulação (dev) | `Invoke-WebRequest -Uri "http://localhost:3000/dev/simulate/reset/5561999990002" -Method GET \| Select-Object -ExpandProperty Content` |
-| Rodar testes (71) | `npm test` |
-| Subir tudo | `docker compose start && npm run dev` |
-| Parar bot (celular normal) | `taskkill /IM node.exe /F` |
-| Parar tudo | `taskkill /IM node.exe /F && docker compose stop` |
-| Health check | `curl http://localhost:3000/health` |
 | Status WhatsApp | `curl http://localhost:3000/admin/instance/ID/status` |
 | Painel Evolution | http://localhost:8080/manager |
 | Prisma Studio | `npx prisma studio` → http://localhost:5555 |
 | Logs do bot | Terminal onde `npm run dev` está rodando |
 | Logs Evolution | `docker logs agendazap-evolution --tail 50` |
-| Testar Claude API | `node -e "import('./src/services/claudeService.js').then(async({processMessage})=>{const r=await processMessage('oi','Assistente.',[]);console.log(r.mensagemParaPaciente);})"`  |
 | Ver conversas (banco) | `npx prisma studio` → tabela `Conversa` |
 | Ver estado das conversas | `docker exec agendazap-postgres psql -U agendazap -d agendazap -c "SELECT telefone, estado, updated_at FROM public.estado_conversa ORDER BY updated_at DESC LIMIT 10;"` |
 | Resetar conversa travada | `docker exec agendazap-postgres psql -U agendazap -d agendazap -c "UPDATE public.estado_conversa SET estado='inicio', contexto_json='{}' WHERE telefone='NUMERO';"` |
@@ -949,7 +1094,5 @@ Acesse `http://localhost:5555` e inspecione:
 | Pacientes em aguardando lembrete | `docker exec agendazap-postgres psql -U agendazap -d agendazap -c "SELECT telefone, updated_at FROM estado_conversa WHERE estado='aguardando_resposta_lembrete';"` |
 | Reautorizar Google (token expirado) | Abrir no browser: `http://localhost:3000/admin/google/auth/ID_DA_CLINICA` |
 | Status OAuth Google | `curl http://localhost:3000/admin/google/status/ID_DA_CLINICA` |
-| Autorizar Google Calendar | Abrir no browser: `http://localhost:3000/admin/google/auth/ID_DA_CLINICA` |
 | Listar calendários Google | `curl http://localhost:3000/admin/calendars/ID_DA_CLINICA \| Select-Object -ExpandProperty Content` |
-| Vincular calendar a profissional | `curl -X PUT http://localhost:3000/admin/profissionais/ID/calendar -H "Content-Type: application/json" -d '{\"calendarId\": \"ID\"}'` |
 | Ver agendamentos + calendar_event_id | `docker exec agendazap-postgres psql -U agendazap -d agendazap -c "SELECT pa.nome, pr.nome, a.data_hora, a.calendar_event_id FROM agendamentos a JOIN pacientes pa ON pa.id=a.paciente_id JOIN profissionais pr ON pr.id=a.profissional_id ORDER BY a.created_at DESC LIMIT 5;"` |

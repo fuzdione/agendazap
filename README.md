@@ -21,6 +21,43 @@ O paciente conversa com um bot inteligente no WhatsApp que agenda consultas sem 
 
 ---
 
+## O que foi implementado — Etapa 6
+
+### Painel Administrativo (Frontend + Backend)
+
+**Backend — novas rotas protegidas por JWT:**
+
+- **`src/routes/auth/login.js`** — `POST /auth/login`: valida e-mail/senha com bcrypt, retorna JWT `{ sub: userId, clinicaId }` com 8h de validade
+- **`src/routes/admin/dashboard.js`** — `GET /admin/dashboard`: métricas reais do banco — agendamentos de hoje, da semana, taxa de confirmação dos últimos 30 dias e próximos 5 agendamentos confirmados
+- **`src/routes/admin/agendamentos.js`**:
+  - `GET /admin/agendamentos` — listagem com filtros (data início/fim, profissional, status) e paginação
+  - `PUT /admin/agendamentos/:id/status` — atualiza status; ao cancelar remove o evento do Google Calendar e cancela o job de lembrete no BullMQ
+- **`src/routes/admin/profissionaisCrud.js`** — CRUD completo: listar, criar, editar e desativar (soft delete — preserva histórico de agendamentos)
+- **`src/routes/admin/configuracoes.js`** — `GET/PUT /admin/configuracoes`: lê e atualiza o `config_json` da clínica com merge (campos não enviados são preservados)
+- **`src/routes/admin/conversas.js`**:
+  - `GET /admin/conversas/contatos` — lista de contatos únicos com última mensagem, nome e total de mensagens
+  - `GET /admin/conversas` — histórico filtrável por telefone e data com paginação
+- **`src/server.js`** — decorator `fastify.authenticate` (preHandler JWT), CORS atualizado para `ADMIN_URL`, registro de todas as novas rotas
+- **`prisma/schema.prisma`** — model `UsuarioAdmin` (id, clinica_id, email unique, senha_hash)
+
+**Frontend — `admin-panel/` (React 18 + Vite + Tailwind CSS v4):**
+
+- **Autenticação** — `AuthContext` com JWT em `sessionStorage`; interceptor Axios redireciona automaticamente para `/login` em qualquer 401; proxy Vite encaminha `/api/*` → `localhost:3000` em dev
+- **Layout** — sidebar responsiva: fixa no desktop, overlay deslizante no mobile via hamburger
+- **Dashboard** — 3 cards de métricas + tabela de próximos agendamentos com ações rápidas (confirmar/cancelar)
+- **Agendamentos** — filtros em tempo real (data, profissional, status), tabela paginada, badges coloridos por status, ações por linha (concluir / no-show / cancelar)
+- **Profissionais** — lista com modal de criar/editar + modal de vinculação de Google Calendar (busca calendários disponíveis e vincula ao profissional)
+- **Configurações** — horários de funcionamento, mensagem de boas-vindas, telefone de fallback, status WhatsApp com botão de QR Code, status Google Calendar com link de autorização
+- **Conversas** — lista de contatos carregada automaticamente ao abrir a aba, busca por nome/telefone em tempo real, conversa em formato de chat (balões bot/paciente) ao selecionar um contato
+
+**Infra e deploy:**
+- `docker-compose.prod.yml`: service `seed` adicionado (roda após `migrate`), `app` aguarda `migrate` concluir, nginx serve `admin-panel/dist` como volume read-only
+- `nginx.conf`: server blocks separados para `api.`, `admin.` e `evolution.`; painel com `try_files` para React Router e proxy `/api` para o backend (sem CORS em produção)
+- `prisma/seed.js`: `CLINIC_PHONE`/`ADMIN_EMAIL`/`ADMIN_SENHA` via variáveis de ambiente, bloqueia senha padrão em `NODE_ENV=production`, só cria profissionais de exemplo se a clínica não tiver nenhum
+- `DEPLOY.md`: manual completo de produção com checkpoints, seção de armadilhas conhecidas e solução de problemas
+
+---
+
 ## O que foi implementado — Etapa 5
 
 - **`src/config/queues.js`** — três filas BullMQ:
@@ -239,23 +276,46 @@ docker ps
 npm run db:push
 ```
 
-### 5. Popular dados de teste (desenvolvimento)
+### 5. Popular dados de desenvolvimento
+
+Configure as variáveis de ambiente do seed antes de rodar (obrigatório):
+
+```bash
+# No .env, defina:
+CLINIC_PHONE=55619XXXXXXXX   # número real do WhatsApp da clínica
+CLINIC_NAME="Nome da Clínica"
+ADMIN_EMAIL=admin@clinica.com
+ADMIN_SENHA=senha-segura
+```
 
 ```bash
 npm run db:seed
 ```
 
 Insere:
-- Clínica: **Clínica Saúde Plena** — `55619 9999-0001`
-- Profissionais: Dr. João Silva (Clínico Geral), Dra. Maria Santos (Dermatologia), Dra. Ana Costa (Nutrição)
+- Clínica com o telefone definido em `CLINIC_PHONE`
+- Usuário admin com e-mail/senha do `.env`
+- 3 profissionais de exemplo (apenas se a clínica ainda não tiver nenhum)
 
-### 6. Iniciar o servidor
+### 6. Iniciar o servidor backend
 
 ```bash
 npm run dev
 ```
 
 O servidor sobe em `http://localhost:3000`.
+
+### 7. Instalar dependências e iniciar o painel admin
+
+```bash
+cd admin-panel
+npm install
+npm run dev
+```
+
+O painel abre em `http://localhost:5175`.
+
+Faça login com o e-mail e senha definidos em `ADMIN_EMAIL` / `ADMIN_SENHA` no `.env`.
 
 ---
 
@@ -350,14 +410,20 @@ Acesse `http://localhost:8080` — deve retornar a mensagem de boas-vindas da AP
 | `REDIS_URL` | URL de conexão Redis | `redis://localhost:6379` |
 | `EVOLUTION_API_URL` | URL da Evolution API | `http://localhost:8080` |
 | `EVOLUTION_API_KEY` | Chave de autenticação da Evolution API | `agendazap-dev-key` |
-| `CLAUDE_API_KEY` | Chave da Anthropic (Claude API) | `sk-ant-...` |
+| `AI_PROVIDER` | Provedor de IA: `openai` ou `claude` | `openai` |
+| `OPENAI_API_KEY` | Chave da OpenAI (se AI_PROVIDER=openai) | `sk-...` |
+| `CLAUDE_API_KEY` | Chave da Anthropic (se AI_PROVIDER=claude) | `sk-ant-...` |
 | `GOOGLE_CLIENT_ID` | Client ID do Google Cloud Console | `xxx.apps.googleusercontent.com` |
 | `GOOGLE_CLIENT_SECRET` | Client Secret do Google | `GOCSPX-...` |
 | `GOOGLE_REDIRECT_URI` | URI de callback OAuth do Google | `http://localhost:3000/admin/google/callback` |
-| `ADMIN_URL` | URL base do painel admin (redirecionamento pós-OAuth) | `http://localhost:5173` |
+| `ADMIN_URL` | URL base do painel admin (CORS + redirect pós-OAuth) | `http://localhost:5175` |
 | `JWT_SECRET` | Segredo para assinar tokens JWT (mín. 16 chars) | `string-longa-e-secreta` |
 | `PORT` | Porta do servidor (padrão: 3000) | `3000` |
 | `NODE_ENV` | Ambiente de execução | `development` |
+| `CLINIC_PHONE` | Telefone WhatsApp da clínica (seed) | `5561999990001` |
+| `CLINIC_NAME` | Nome da clínica (seed) | `Clínica Saúde Plena` |
+| `ADMIN_EMAIL` | E-mail do usuário admin (seed) | `admin@clinica.com` |
+| `ADMIN_SENHA` | Senha do usuário admin (seed) | `senha-segura` |
 
 ---
 
@@ -384,6 +450,7 @@ Clinicas ──< Profissionais
          ──< Agendamentos
          ──< Conversas
          ──< EstadoConversa (chave composta: telefone + clinica_id)
+         ──< UsuariosAdmin
 ```
 
-O sistema é **multi-tenant**: cada clínica é um tenant isolado. A identificação da clínica é feita pelo número de WhatsApp que recebeu a mensagem.
+O sistema é **multi-tenant**: cada clínica é um tenant isolado. A identificação da clínica é feita pelo número de WhatsApp que recebeu a mensagem. Todas as rotas `/admin/*` extraem o `clinicaId` do JWT — nunca do corpo da requisição — garantindo isolamento total entre clínicas.
