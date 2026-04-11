@@ -15,10 +15,10 @@ fi
 echo "==> Atualizando código..."
 git pull
 
-echo "==> Substituindo SEU_DOMINIO no nginx.conf..."
+echo "==> Lendo variáveis do .env..."
 source .env 2>/dev/null || true
-DOMAIN="${DOMAIN:-$(grep ADMIN_URL .env | cut -d= -f2 | sed 's|https\?://||')}"
-sed -i "s/SEU_DOMINIO/$DOMAIN/g" nginx/nginx.conf 2>/dev/null || true
+# Extrai só o hostname do SERVER_URL (remove scheme e path)
+DOMAIN=$(echo "${SERVER_URL:-}" | sed 's|https\?://||' | cut -d/ -f1)
 
 echo "==> Build do painel administrativo (React/Vite)..."
 cd admin-panel
@@ -49,10 +49,6 @@ docker compose -f docker-compose.prod.yml ps
 
 echo ""
 echo "==> Deploy concluído!"
-echo "    API:          http://api.$DOMAIN"
-echo "    Painel:       http://admin.$DOMAIN"
-echo "    Evolution:    http://evolution.$DOMAIN"
-echo "    Health check: http://api.$DOMAIN/health"
-echo ""
-echo "    Para SSL, instale certbot e execute:"
-echo "    certbot --nginx -d $DOMAIN -d evolution.$DOMAIN"
+echo "    Painel:       https://$DOMAIN/painel"
+echo "    Health check: https://$DOMAIN/health"
+echo "    Evolution:    https://api.$DOMAIN"
