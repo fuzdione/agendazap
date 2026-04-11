@@ -6,8 +6,14 @@ Siga esta lista em ordem. Cada etapa tem um checkpoint de verificação antes de
 
 ## PRÉ-REQUISITOS (feito uma única vez no servidor)
 
-### A. Servidor Ubuntu com Docker instalado
+### A. Servidor Ubuntu com Docker e Node.js instalados
 - [ ] Ubuntu 22.04+, mínimo 2 GB RAM, 20 GB disco
+- [ ] Node.js 20+ instalado (necessário para build do painel React/Tailwind v4)
+  ```bash
+  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  apt-get install -y nodejs
+  node -v  # deve exibir v20.x.x
+  ```
 - [ ] Docker e Docker Compose instalados
 - [ ] Porta 80 e 443 abertas no firewall
 

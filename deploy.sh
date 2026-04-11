@@ -22,6 +22,8 @@ sed -i "s/SEU_DOMINIO/$DOMAIN/g" nginx/nginx.conf 2>/dev/null || true
 
 echo "==> Build do painel administrativo (React/Vite)..."
 cd admin-panel
+# Remove node_modules e lock para garantir binários nativos compatíveis com o SO atual
+rm -rf node_modules package-lock.json
 npm install --silent
 npm run build
 cd ..
