@@ -156,7 +156,10 @@ export async function whatsappWebhookRoutes(fastify) {
             : 'Desculpe, tive um probleminha técnico. Pode repetir sua mensagem? 🙏';
         }
 
-        await sendTextMessage(instanceName, remoteJid, resposta);
+        // Guard: nunca enviar mensagem vazia (causa rejeição 400 na Evolution API)
+        const respostaSegura = resposta?.trim()
+          || 'Desculpe, tive um probleminha técnico. Pode repetir sua mensagem? 🙏';
+        await sendTextMessage(instanceName, remoteJid, respostaSegura);
 
         // Recarrega o paciente — conversationService pode ter atualizado o nome
         const pacienteAtualizado = await prisma.paciente.findFirst({

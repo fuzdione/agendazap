@@ -25,7 +25,7 @@ export async function conversasAdminRoutes(fastify) {
         COUNT(*)::int                                              AS total
       FROM conversas c
       LEFT JOIN pacientes p ON p.id = c.paciente_id
-      WHERE c.clinica_id = ${clinicaId}::uuid
+      WHERE c.clinica_id::text = ${clinicaId}
       GROUP BY c.telefone, p.nome
       ORDER BY ultima_data DESC
       LIMIT 100
