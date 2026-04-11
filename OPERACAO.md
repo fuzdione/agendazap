@@ -1,3 +1,8 @@
+Desenvolvimento local (o que você faz hoje pra subir o ambiente):
+docker compose up -d          → Postgres, Redis, Evolution, Adminer
+npm run dev (raiz)            → Backend Fastify  :3000
+cd admin-panel && npm run dev → Painel React      :5173 (proxy → :3000)
+  
 # AgendaZap — Guia de Operação
 
 Referência completa de comandos para operar o ambiente de desenvolvimento.
@@ -130,15 +135,15 @@ npm install
 npm run dev
 ```
 
-**O que faz:** Sobe o frontend React com Vite na porta 5175.
+**O que faz:** Sobe o frontend React com Vite na porta 5173.
 **Resultado esperado:**
 
 ```
   VITE v6.x.x  ready in ...ms
-  ➜  Local:   http://localhost:5175/
+  ➜  Local:   http://localhost:5173/
 ```
 
-Abra `http://localhost:5175` no navegador e faça login com as credenciais definidas em `ADMIN_EMAIL` / `ADMIN_SENHA`.
+Abra `http://localhost:5173` no navegador e faça login com as credenciais definidas em `ADMIN_EMAIL` / `ADMIN_SENHA`.
 
 > O painel só funciona com o servidor backend rodando (passo 1.6). As chamadas de API são proxiadas automaticamente pelo Vite para `localhost:3000`.
 
@@ -200,7 +205,7 @@ npm run dev
 ```
 
 **Quando usar:** Para acessar o painel administrativo no browser.
-**URL:** http://localhost:5175
+**URL:** http://localhost:5173
 **Login:** e-mail e senha do `.env` (`ADMIN_EMAIL` / `ADMIN_SENHA`)
 **Terminal:** Deixe este terminal aberto — o Vite exibe erros de build aqui.
 
@@ -292,17 +297,21 @@ docker logs agendazap-evolution --tail 100 2>&1 | Select-String "ERROR"
 
 ## 3. WHATSAPP / EVOLUTION API
 
-> Para os comandos abaixo, você precisa do ID da clínica. Obtenha-o com:
+> Para os comandos abaixo, você precisa do ID da clínica. Obtenha-o via Prisma Studio (seção 4.1).
+>
+> As rotas `/admin/instance/*` exigem autenticação JWT. Obtenha o token antes de rodar os comandos:
 > ```powershell
-> curl http://localhost:3000/health  # confirma que o servidor está rodando
+> $TOKEN = (Invoke-RestMethod -Uri "http://localhost:3000/auth/login" `
+>   -Method POST -ContentType "application/json" `
+>   -Body '{"email":"SEU_EMAIL","senha":"SUA_SENHA"}').data.token
 > ```
-> O ID está no banco — acesse via Prisma Studio (seção 4.1).
 
 ### 3.1 Criar instância WhatsApp para uma clínica
 
 ```powershell
 curl -X POST http://localhost:3000/admin/instance/create `
   -H "Content-Type: application/json" `
+  -H "Authorization: Bearer $TOKEN" `
   -d '{"clinicaId": "ID_DA_CLINICA"}'
 ```
 
@@ -314,7 +323,8 @@ curl -X POST http://localhost:3000/admin/instance/create `
 ### 3.2 Gerar QR code para conectar o WhatsApp
 
 ```powershell
-curl http://localhost:3000/admin/instance/ID_DA_CLINICA/qrcode
+curl -H "Authorization: Bearer $TOKEN" `
+  http://localhost:3000/admin/instance/ID_DA_CLINICA/qrcode
 ```
 
 **O que faz:** Retorna o QR code para escanear com o celular da clínica.
@@ -327,7 +337,8 @@ curl http://localhost:3000/admin/instance/ID_DA_CLINICA/qrcode
 ### 3.3 Verificar status da conexão WhatsApp
 
 ```powershell
-curl http://localhost:3000/admin/instance/ID_DA_CLINICA/status
+curl -H "Authorization: Bearer $TOKEN" `
+  http://localhost:3000/admin/instance/ID_DA_CLINICA/status
 ```
 
 **Resultado esperado quando conectado:**
@@ -531,10 +542,14 @@ SELECT * FROM public.clinicas;
 
 ## 5. GOOGLE CALENDAR
 
+> As rotas `/admin/google/status/*`, `/admin/calendars/*` e `/admin/profissionais/*/calendar`
+> exigem autenticação JWT. Se ainda não tiver o token, obtenha-o (veja início da seção 3).
+
 ### 5.1 Verificar se a clínica tem Google Calendar autorizado
 
 ```powershell
-curl http://localhost:3000/admin/google/status/ID_DA_CLINICA
+curl -H "Authorization: Bearer $TOKEN" `
+  http://localhost:3000/admin/google/status/ID_DA_CLINICA
 ```
 
 **Resultado esperado quando autorizado:**
@@ -567,7 +582,8 @@ Se aparecer `google_auth=error&reason=...`, o campo `reason` na URL indica o pro
 ### 5.3 Listar calendários disponíveis da conta Google
 
 ```powershell
-curl http://localhost:3000/admin/calendars/ID_DA_CLINICA | Select-Object -ExpandProperty Content
+curl -H "Authorization: Bearer $TOKEN" `
+  http://localhost:3000/admin/calendars/ID_DA_CLINICA | Select-Object -ExpandProperty Content
 ```
 
 Retorna a lista de calendários da conta Google conectada com `id` e `summary`.
@@ -579,6 +595,7 @@ Retorna a lista de calendários da conta Google conectada com `id` e `summary`.
 ```powershell
 curl -X PUT http://localhost:3000/admin/profissionais/ID_DO_PROFISSIONAL/calendar `
   -H "Content-Type: application/json" `
+  -H "Authorization: Bearer $TOKEN" `
   -d '{\"calendarId\": \"ID_DO_CALENDAR\"}'
 ```
 
@@ -683,7 +700,7 @@ docker exec agendazap-postgres psql -U agendazap -d agendazap -c "UPDATE estado_
 
 1. Certifique-se de que o servidor backend está rodando (`npm run dev` na raiz)
 2. Na pasta `admin-panel`, rode `npm run dev`
-3. Abra **http://localhost:5175** no navegador
+3. Abra **http://localhost:5173** no navegador
 4. Faça login com `ADMIN_EMAIL` e `ADMIN_SENHA` do `.env`
 
 ---
@@ -775,7 +792,8 @@ Se falhar: `npm run dev`
 
 **Passo 2 — Verifique se o WhatsApp está conectado:**
 ```powershell
-curl http://localhost:3000/admin/instance/ID_DA_CLINICA/status
+curl -H "Authorization: Bearer $TOKEN" `
+  http://localhost:3000/admin/instance/ID_DA_CLINICA/status
 ```
 Se não for `open`: gere novo QR code e escaneie novamente.
 
@@ -850,7 +868,8 @@ curl -X DELETE -H "apikey: agendazap-dev-key" http://localhost:8080/instance/log
 
 **Passo 3 — Tente gerar o QR novamente:**
 ```powershell
-curl http://localhost:3000/admin/instance/ID_DA_CLINICA/qrcode
+curl -H "Authorization: Bearer $TOKEN" `
+  http://localhost:3000/admin/instance/ID_DA_CLINICA/qrcode
 ```
 
 **Se ainda não funcionar — delete e recrie a instância:**
@@ -859,6 +878,7 @@ curl -X DELETE -H "apikey: agendazap-dev-key" http://localhost:8080/instance/del
 
 curl -X POST http://localhost:3000/admin/instance/create `
   -H "Content-Type: application/json" `
+  -H "Authorization: Bearer $TOKEN" `
   -d '{"clinicaId": "ID_DA_CLINICA"}'
 ```
 
@@ -1071,7 +1091,7 @@ Acesse `http://localhost:5555` e inspecione:
 
 | Ação | Comando / URL |
 |---|---|
-| **Painel admin** | http://localhost:5175 (login: ADMIN_EMAIL/ADMIN_SENHA) |
+| **Painel admin** | http://localhost:5173 (login: ADMIN_EMAIL/ADMIN_SENHA) |
 | Iniciar painel admin | `cd admin-panel && npm run dev` |
 | Iniciar servidor bot | `cd C:\agendaZap\agendazap && npm run dev` |
 | Subir infra Docker | `docker compose start` |
@@ -1082,7 +1102,7 @@ Acesse `http://localhost:5555` e inspecione:
 | Simular mensagem (dev) | `Invoke-WebRequest -Uri "http://localhost:3000/dev/simulate" -Method POST -ContentType "application/json" -Body '{"phone":"5561999990002","message":"Oi"}' \| Select-Object -ExpandProperty Content` |
 | Ver estado simulação (dev) | `Invoke-WebRequest -Uri "http://localhost:3000/dev/simulate/state/5561999990002" -Method GET \| Select-Object -ExpandProperty Content` |
 | Resetar simulação (dev) | `Invoke-WebRequest -Uri "http://localhost:3000/dev/simulate/reset/5561999990002" -Method GET \| Select-Object -ExpandProperty Content` |
-| Status WhatsApp | `curl http://localhost:3000/admin/instance/ID/status` |
+| Status WhatsApp | `curl -H "Authorization: Bearer $TOKEN" http://localhost:3000/admin/instance/ID/status` |
 | Painel Evolution | http://localhost:8080/manager |
 | Prisma Studio | `npx prisma studio` → http://localhost:5555 |
 | Logs do bot | Terminal onde `npm run dev` está rodando |
@@ -1093,6 +1113,6 @@ Acesse `http://localhost:5555` e inspecione:
 | Lembretes pendentes | `docker exec agendazap-postgres psql -U agendazap -d agendazap -c "SELECT pa.nome, a.data_hora, a.lembrete_enviado_at FROM agendamentos a JOIN pacientes pa ON pa.id=a.paciente_id WHERE a.status='confirmado' AND a.data_hora > NOW() ORDER BY a.data_hora;"` |
 | Pacientes em aguardando lembrete | `docker exec agendazap-postgres psql -U agendazap -d agendazap -c "SELECT telefone, updated_at FROM estado_conversa WHERE estado='aguardando_resposta_lembrete';"` |
 | Reautorizar Google (token expirado) | Abrir no browser: `http://localhost:3000/admin/google/auth/ID_DA_CLINICA` |
-| Status OAuth Google | `curl http://localhost:3000/admin/google/status/ID_DA_CLINICA` |
-| Listar calendários Google | `curl http://localhost:3000/admin/calendars/ID_DA_CLINICA \| Select-Object -ExpandProperty Content` |
+| Status OAuth Google | `curl -H "Authorization: Bearer $TOKEN" http://localhost:3000/admin/google/status/ID_DA_CLINICA` |
+| Listar calendários Google | `curl -H "Authorization: Bearer $TOKEN" http://localhost:3000/admin/calendars/ID_DA_CLINICA \| Select-Object -ExpandProperty Content` |
 | Ver agendamentos + calendar_event_id | `docker exec agendazap-postgres psql -U agendazap -d agendazap -c "SELECT pa.nome, pr.nome, a.data_hora, a.calendar_event_id FROM agendamentos a JOIN pacientes pa ON pa.id=a.paciente_id JOIN profissionais pr ON pr.id=a.profissional_id ORDER BY a.created_at DESC LIMIT 5;"` |

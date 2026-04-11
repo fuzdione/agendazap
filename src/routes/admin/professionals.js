@@ -9,8 +9,14 @@ export async function professionalsRoutes(fastify) {
    * Lista os calendários disponíveis na conta Google conectada à clínica.
    * O admin usa esta lista para escolher qual calendar associar a cada profissional.
    */
-  fastify.get('/admin/calendars/:clinicaId', async (request, reply) => {
+  fastify.get('/admin/calendars/:clinicaId', {
+    preHandler: [fastify.authenticate],
+  }, async (request, reply) => {
     const { clinicaId } = request.params;
+
+    if (request.user.clinicaId !== clinicaId) {
+      return reply.status(403).send({ success: false, error: 'Acesso negado' });
+    }
 
     const clinica = await prisma.clinica.findUnique({ where: { id: clinicaId } });
     if (!clinica) {
@@ -37,6 +43,7 @@ export async function professionalsRoutes(fastify) {
    * Deve ser chamado após o admin listar os calendars disponíveis e escolher o correto.
    */
   fastify.put('/admin/profissionais/:profissionalId/calendar', {
+    preHandler: [fastify.authenticate],
     schema: {
       body: {
         type: 'object',
@@ -56,6 +63,10 @@ export async function professionalsRoutes(fastify) {
 
     if (!profissional) {
       return reply.status(404).send({ success: false, error: 'Profissional não encontrado' });
+    }
+
+    if (profissional.clinicaId !== request.user.clinicaId) {
+      return reply.status(403).send({ success: false, error: 'Acesso negado' });
     }
 
     const atualizado = await prisma.profissional.update({

@@ -20,6 +20,12 @@ source .env 2>/dev/null || true
 DOMAIN="${DOMAIN:-$(grep ADMIN_URL .env | cut -d= -f2 | sed 's|https\?://||')}"
 sed -i "s/SEU_DOMINIO/$DOMAIN/g" nginx/nginx.conf 2>/dev/null || true
 
+echo "==> Build do painel administrativo (React/Vite)..."
+cd admin-panel
+npm install --silent
+npm run build
+cd ..
+
 echo "==> Build das imagens da aplicação..."
 docker compose -f docker-compose.prod.yml build app migrate
 
@@ -41,9 +47,10 @@ docker compose -f docker-compose.prod.yml ps
 
 echo ""
 echo "==> Deploy concluído!"
-echo "    App:          http://$DOMAIN"
+echo "    API:          http://api.$DOMAIN"
+echo "    Painel:       http://admin.$DOMAIN"
 echo "    Evolution:    http://evolution.$DOMAIN"
-echo "    Health check: http://$DOMAIN/health"
+echo "    Health check: http://api.$DOMAIN/health"
 echo ""
 echo "    Para SSL, instale certbot e execute:"
 echo "    certbot --nginx -d $DOMAIN -d evolution.$DOMAIN"

@@ -24,21 +24,21 @@ export async function dashboardRoutes(fastify) {
     const inicio30Dias = new Date(agora.getTime() - 30 * 24 * 60 * 60 * 1000);
 
     const [totalHoje, totalSemana, agendamentos30Dias, proximosAgendamentos] = await Promise.all([
-      // Total de agendamentos hoje (exceto cancelados)
+      // Total de agendamentos hoje (exceto cancelados e no-show)
       prisma.agendamento.count({
         where: {
           clinicaId,
           dataHora: { gte: inicioDia, lte: fimDia },
-          status: { not: 'cancelado' },
+          status: { notIn: ['cancelado', 'no_show'] },
         },
       }),
 
-      // Total de agendamentos da semana (exceto cancelados)
+      // Total de agendamentos da semana (exceto cancelados e no-show)
       prisma.agendamento.count({
         where: {
           clinicaId,
           dataHora: { gte: inicioSemana, lt: fimSemana },
-          status: { not: 'cancelado' },
+          status: { notIn: ['cancelado', 'no_show'] },
         },
       }),
 

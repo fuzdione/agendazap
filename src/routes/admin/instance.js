@@ -16,6 +16,7 @@ export async function instanceRoutes(fastify) {
    * O nome da instância é o telefone da clínica (garante unicidade e facilita lookup no webhook).
    */
   fastify.post('/admin/instance/create', {
+    preHandler: [fastify.authenticate],
     schema: {
       body: {
         type: 'object',
@@ -53,8 +54,14 @@ export async function instanceRoutes(fastify) {
    * Retorna o QR code para conectar o celular da clínica ao WhatsApp.
    * Deve ser escaneado com o WhatsApp do número cadastrado na clínica.
    */
-  fastify.get('/admin/instance/:clinicaId/qrcode', async (request, reply) => {
+  fastify.get('/admin/instance/:clinicaId/qrcode', {
+    preHandler: [fastify.authenticate],
+  }, async (request, reply) => {
     const { clinicaId } = request.params;
+
+    if (request.user.clinicaId !== clinicaId) {
+      return reply.status(403).send({ success: false, error: 'Acesso negado' });
+    }
 
     const clinica = await prisma.clinica.findUnique({
       where: { id: clinicaId },
@@ -77,8 +84,14 @@ export async function instanceRoutes(fastify) {
    * Retorna o status de conexão do WhatsApp da clínica.
    * Estados possíveis: open (conectado), close (desconectado), connecting (aguardando QR).
    */
-  fastify.get('/admin/instance/:clinicaId/status', async (request, reply) => {
+  fastify.get('/admin/instance/:clinicaId/status', {
+    preHandler: [fastify.authenticate],
+  }, async (request, reply) => {
     const { clinicaId } = request.params;
+
+    if (request.user.clinicaId !== clinicaId) {
+      return reply.status(403).send({ success: false, error: 'Acesso negado' });
+    }
 
     const clinica = await prisma.clinica.findUnique({
       where: { id: clinicaId },

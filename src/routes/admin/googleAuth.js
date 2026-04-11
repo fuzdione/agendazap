@@ -77,8 +77,14 @@ export async function googleAuthRoutes(fastify) {
   /**
    * Retorna se a clínica tem o Google Calendar conectado (refresh_token salvo).
    */
-  fastify.get('/admin/google/status/:clinicaId', async (request, reply) => {
+  fastify.get('/admin/google/status/:clinicaId', {
+    preHandler: [fastify.authenticate],
+  }, async (request, reply) => {
     const { clinicaId } = request.params;
+
+    if (request.user.clinicaId !== clinicaId) {
+      return reply.status(403).send({ success: false, error: 'Acesso negado' });
+    }
 
     const clinica = await prisma.clinica.findUnique({
       where: { id: clinicaId },
