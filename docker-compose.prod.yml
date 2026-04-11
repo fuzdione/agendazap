@@ -106,12 +106,17 @@ services:
         condition: service_healthy
       evolution-api:
         condition: service_started
+      migrate:
+        condition: service_completed_successfully
 
   migrate:
     build: .
     container_name: agendazap-migrate
     restart: "no"
-    command: npx prisma migrate deploy
+    # Usa db push porque o projeto não tem arquivos de migration gerados.
+    # Se no futuro você rodar "prisma migrate dev" e commitar a pasta prisma/migrations,
+    # troque este comando por: npx prisma migrate deploy
+    command: npx prisma db push --accept-data-loss
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/agendazap
     networks:
@@ -119,6 +124,24 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  seed:
+    build: .
+    container_name: agendazap-seed
+    restart: "no"
+    command: node prisma/seed.js
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/agendazap
+      - NODE_ENV=production
+      - CLINIC_PHONE=${CLINIC_PHONE}
+      - CLINIC_NAME=${CLINIC_NAME}
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
+      - ADMIN_SENHA=${ADMIN_SENHA}
+    networks:
+      - agendazap-network
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 
   nginx:
     image: nginx:alpine
@@ -130,6 +153,8 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/certs:/etc/nginx/certs:ro
+      # Pasta gerada por "npm run build" dentro de admin-panel/
+      - ./admin-panel/dist:/usr/share/nginx/html/admin:ro
     networks:
       - agendazap-network
     depends_on:

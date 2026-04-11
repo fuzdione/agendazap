@@ -17,11 +17,12 @@ model Clinica {
   ativo               Boolean  @default(true)
   createdAt           DateTime @default(now()) @map("created_at")
 
-  profissionais Profissional[]
-  pacientes     Paciente[]
-  agendamentos  Agendamento[]
-  conversas     Conversa[]
+  profissionais   Profissional[]
+  pacientes       Paciente[]
+  agendamentos    Agendamento[]
+  conversas       Conversa[]
   estadosConversa EstadoConversa[]
+  usuariosAdmin   UsuarioAdmin[]
 
   @@map("clinicas")
 }
@@ -106,6 +107,18 @@ model EstadoConversa {
 
   @@id([telefone, clinicaId])
   @@map("estado_conversa")
+}
+
+model UsuarioAdmin {
+  id        String   @id @default(uuid())
+  clinicaId String   @map("clinica_id")
+  email     String   @unique
+  senhaHash String   @map("senha_hash")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  clinica Clinica @relation(fields: [clinicaId], references: [id], onDelete: Cascade)
+
+  @@map("usuarios_admin")
 }
 
 enum StatusAgendamento {

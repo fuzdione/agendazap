@@ -9,6 +9,12 @@ import { instanceRoutes } from './routes/admin/instance.js';
 import { googleAuthRoutes } from './routes/admin/googleAuth.js';
 import { professionalsRoutes } from './routes/admin/professionals.js';
 import { devSimulateRoutes } from './routes/dev/simulate.js';
+import { authRoutes } from './routes/auth/login.js';
+import { dashboardRoutes } from './routes/admin/dashboard.js';
+import { agendamentosAdminRoutes } from './routes/admin/agendamentos.js';
+import { profissionaisCrudRoutes } from './routes/admin/profissionaisCrud.js';
+import { configuracoesRoutes } from './routes/admin/configuracoes.js';
+import { conversasAdminRoutes } from './routes/admin/conversas.js';
 import { scannerQueue } from './config/queues.js';
 import { sendReminderWorker } from './jobs/sendReminder.js';
 import { checkReminderResponseWorker } from './jobs/checkReminderResponse.js';
@@ -26,11 +32,21 @@ const server = Fastify({
 
 // Plugins
 await server.register(cors, {
-  origin: env.NODE_ENV === 'development' ? true : false,
+  origin: env.NODE_ENV === 'development' ? true : (env.ADMIN_URL ?? false),
+  credentials: true,
 });
 
 await server.register(jwt, {
   secret: env.JWT_SECRET,
+});
+
+// Decorator de autenticação — usado como preHandler nas rotas protegidas
+server.decorate('authenticate', async function (request, reply) {
+  try {
+    await request.jwtVerify();
+  } catch (err) {
+    reply.send(err);
+  }
 });
 
 // Rota de health check
@@ -67,6 +83,14 @@ await server.register(whatsappWebhookRoutes);
 await server.register(instanceRoutes);
 await server.register(googleAuthRoutes);
 await server.register(professionalsRoutes);
+
+// Rotas do painel administrativo
+await server.register(authRoutes);
+await server.register(dashboardRoutes);
+await server.register(agendamentosAdminRoutes);
+await server.register(profissionaisCrudRoutes);
+await server.register(configuracoesRoutes);
+await server.register(conversasAdminRoutes);
 
 // Rotas de desenvolvimento — simulador de mensagens (apenas NODE_ENV=development)
 await server.register(devSimulateRoutes);
