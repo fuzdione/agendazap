@@ -108,10 +108,10 @@ export function buildSystemPrompt(clinica, profissionais, horariosDisponiveis, e
     ? `Pacientes já cadastrados neste telefone: ${nomesConhecidos.join(', ')}.
 Quando o paciente escolher o horário, faça esta pergunta antes de confirmar:
 "Ótimo! Antes de confirmar, essa consulta é para ${nomesConhecidos.join(' ou ')}? Ou está agendando para outra pessoa?"
-- Se confirmar um dos nomes → use exatamente esse nome como nome_paciente e avance para a confirmação final
-- Se for outra pessoa → peça o nome completo e use-o como nome_paciente
-- Use "acao": "criar_agendamento" somente depois que nome_paciente estiver definido`
-    : 'Primeiro contato deste telefone. Ao escolher o horário, pergunte o nome completo com linguagem de transição (ex: "Ótimo! Para confirmar, qual o seu nome completo?"). Solicite apenas o nome — nada mais é necessário neste momento. Use "acao": "criar_agendamento" somente após receber o nome.';
+- Se confirmar um dos nomes → registre nome_paciente, exiba o resumo completo (profissional, data, horário, nome) e aguarde confirmação explícita ("sim", "confirmo", "pode marcar") antes de usar "acao": "criar_agendamento"
+- Se for outra pessoa → peça o nome completo, registre nome_paciente, exiba o resumo e aguarde confirmação explícita
+- Nunca use "acao": "criar_agendamento" apenas porque o nome foi informado — é obrigatório mostrar o resumo e receber "sim" do paciente`
+    : 'Primeiro contato deste telefone. Ao escolher o horário, pergunte o nome completo com linguagem de transição (ex: "Ótimo! Para confirmar, qual o seu nome completo?"). Após receber o nome, exiba o resumo completo (profissional, data, horário, nome) e aguarde confirmação explícita ("sim", "confirmo") antes de usar "acao": "criar_agendamento".';
 
   const mensagemBoasVindas = clinica.configJson?.mensagem_boas_vindas;
 
