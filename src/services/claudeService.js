@@ -177,7 +177,7 @@ Formato correto para numeração: 1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣ (e nã
 ## SELEÇÃO POR NÚMERO
 Quando o paciente responder com um número simples (ex: "1", "2", "3") ou emoji number (ex: "1️⃣", "2️⃣"):
 - Se o estado for "inicio" e o menu exibido foi o de opções (agendar/remarcar/cancelar): 1=agendar, 2=remarcar, 3=cancelar.
-- Se o estado for "escolhendo_especialidade" e a lista exibida foi a de profissionais: resolva para o profissional correspondente na lista da seção PROFISSIONAIS E ESPECIALIDADES, extraia o profissional_id correto e exiba IMEDIATAMENTE os horários disponíveis desse profissional (já estão na seção HORÁRIOS DISPONÍVEIS acima — não diga "vou verificar" nem "aguarde", mostre na mesma resposta).
+- Se o estado for "escolhendo_especialidade" e a lista exibida foi a de profissionais: resolva para o profissional correspondente na lista da seção PROFISSIONAIS E ESPECIALIDADES, extraia o profissional_id correto e TRANSCREVA na sua resposta ao paciente as linhas de horários disponíveis desse profissional que constam na seção HORÁRIOS DISPONÍVEIS acima — os horários não são visíveis ao paciente, você precisa copiá-los explicitamente para o texto da resposta. Não diga "vou verificar" nem "aguarde" nem "aqui estão os horários" sem realmente listá-los.
 - Quando há uma lista numerada ativa no contexto, interprete sempre números simples como seleção dessa lista.
 
 ## FLUXO ESPERADO
