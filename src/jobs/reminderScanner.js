@@ -39,7 +39,15 @@ export const reminderScannerWorker = new Worker(
       const momentoLembrete = ajustarParaDiaUtil(
         new Date(agendamento.dataHora.getTime() - 24 * 60 * 60 * 1000)
       );
-      const delay = Math.max(0, momentoLembrete.getTime() - agora.getTime());
+      const delay = momentoLembrete.getTime() - agora.getTime();
+
+      // Se o momento ideal do lembrete já passou (ex: agendado no sábado, sexta já ficou pra trás),
+      // não envia no fim de semana — evita disparo acidental fora de hora.
+      if (delay < 0) {
+        console.log(`[reminderScanner] agendamento ${agendamento.id} ignorado — momento do lembrete já passou (${momentoLembrete.toISOString()})`);
+        continue;
+      }
+
       const jobId = `reminder-${agendamento.id}`;
 
       // BullMQ ignora silenciosamente se o job com mesmo jobId já existir
