@@ -89,6 +89,7 @@ export async function processMessage(messageText, systemPrompt, recentHistory, e
         {
           model: MODEL,
           max_tokens: MAX_TOKENS,
+          temperature: 0,
           messages,
           response_format: { type: 'json_object' },
         },
