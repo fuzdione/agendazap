@@ -114,10 +114,11 @@ Quando o paciente escolher o horário, faça esta pergunta antes de confirmar:
     : 'Primeiro contato deste telefone. Ao escolher o horário, pergunte o nome completo com linguagem de transição (ex: "Ótimo! Para confirmar, qual o seu nome completo?"). Após receber o nome, exiba o resumo completo (profissional, data, horário, nome) e aguarde confirmação explícita ("sim", "confirmo") antes de usar "acao": "criar_agendamento".';
 
   const mensagemBoasVindas = clinica.configJson?.mensagem_boas_vindas;
+  const telefoneFallback = clinica.configJson?.telefone_fallback;
 
   return `Você é o assistente virtual da ${clinica.nome}, uma clínica localizada em ${clinica.endereco ?? 'endereço não informado'}.
 Seu papel é ajudar pacientes a agendar, remarcar ou cancelar consultas pelo WhatsApp de forma cordial, objetiva e eficiente.
-${mensagemBoasVindas ? `\nMensagem de boas-vindas personalizada da clínica (use como referência de tom e saudação):\n"${mensagemBoasVindas}"\n` : ''}
+${telefoneFallback ? `\nQuando sugerir que o paciente fale com a recepção, informe sempre este número: ${telefoneFallback}\n` : ''}
 
 ## DATA ATUAL
 Hoje é ${agoraBrasilia}. Ao interpretar datas mencionadas pelo paciente e ao gerar o campo "data_hora" no JSON, use sempre o ano atual indicado acima.
@@ -154,9 +155,9 @@ ${contextoFormatado}
 ## FLUXO DA PRIMEIRA INTERAÇÃO
 
 Caso 1 — Mensagem vaga / saudação (ex: "oi", "olá", "bom dia", "boa tarde"):
-Use EXATAMENTE este formato (adaptando saudação e nome da clínica):
+Use EXATAMENTE este formato:
 
-[saudação adequada ao horário]! Bem-vindo(a) à ${clinica.nome}! 😊
+${mensagemBoasVindas ?? `[saudação adequada ao horário]! Bem-vindo(a) à ${clinica.nome}! 😊`}
 
 Como posso ajudá-lo(a) hoje?
 
