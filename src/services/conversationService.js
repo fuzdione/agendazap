@@ -401,7 +401,7 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
   );
 
   // 8b. Contador de mensagens incompreensíveis — escala para recepção após 3 seguidas
-  const isIncompreensivel = controle.intencao === 'outro' && (controle.confianca ?? 1.0) < 0.4;
+  const isIncompreensivel = controle.intencao === 'outro' && controle.acao === 'nenhuma';
   const contagemAnterior = estadoConversa.contextoJson?.tentativas_sem_entendimento ?? 0;
   const novaContagem = isIncompreensivel ? contagemAnterior + 1 : 0;
 
