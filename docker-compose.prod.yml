@@ -98,6 +98,7 @@ services:
       - OWNER_URL=${OWNER_URL}
       - SERVER_URL=${SERVER_URL}
       - JWT_SECRET=${JWT_SECRET}
+      - TEST_PHONE_WHITELIST=${TEST_PHONE_WHITELIST:-}
       - PORT=3000
     networks:
       - agendazap-network
