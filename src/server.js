@@ -16,6 +16,11 @@ import { agendamentosAdminRoutes } from './routes/admin/agendamentos.js';
 import { profissionaisCrudRoutes } from './routes/admin/profissionaisCrud.js';
 import { configuracoesRoutes } from './routes/admin/configuracoes.js';
 import { conversasAdminRoutes } from './routes/admin/conversas.js';
+import { ownerAuthRoutes } from './routes/owner/auth.js';
+import { ownerDashboardRoutes } from './routes/owner/dashboard.js';
+import { ownerClinicasRoutes } from './routes/owner/clinicas.js';
+import { ownerInstanciasRoutes } from './routes/owner/instancias.js';
+import { authenticateOwner } from './middleware/authenticateOwner.js';
 import { scannerQueue } from './config/queues.js';
 import { sendReminderWorker } from './jobs/sendReminder.js';
 import { checkReminderResponseWorker } from './jobs/checkReminderResponse.js';
@@ -32,10 +37,12 @@ const server = Fastify({
 });
 
 // Plugins
-// Extrai só a origem (scheme + host) do ADMIN_URL — o path /painel não é válido como origin CORS
-const adminOrigin = env.ADMIN_URL ? new URL(env.ADMIN_URL).origin : false;
+// Extrai só a origem (scheme + host) do ADMIN_URL e OWNER_URL — paths não são válidos como origin CORS
+const adminOrigin = env.ADMIN_URL ? new URL(env.ADMIN_URL).origin : null;
+const ownerOrigin = env.OWNER_URL ? new URL(env.OWNER_URL).origin : null;
+const allowedOrigins = [adminOrigin, ownerOrigin].filter(Boolean);
 await server.register(cors, {
-  origin: env.NODE_ENV === 'development' ? true : (adminOrigin || false),
+  origin: env.NODE_ENV === 'development' ? true : (allowedOrigins.length > 0 ? allowedOrigins : false),
   credentials: true,
 });
 
@@ -49,7 +56,7 @@ await server.register(rateLimit, {
   redis,         // usa Redis para persistir contadores entre instâncias/reinicializações
 });
 
-// Decorator de autenticação — usado como preHandler nas rotas protegidas
+// Decorator de autenticação para admins de clínica
 server.decorate('authenticate', async function (request, reply) {
   try {
     await request.jwtVerify();
@@ -57,6 +64,9 @@ server.decorate('authenticate', async function (request, reply) {
     reply.send(err);
   }
 });
+
+// Decorator de autenticação para o proprietário da solução (role="owner")
+server.decorate('authenticateOwner', authenticateOwner);
 
 // Rota de health check
 server.get('/health', async (request, reply) => {
@@ -100,6 +110,12 @@ await server.register(agendamentosAdminRoutes);
 await server.register(profissionaisCrudRoutes);
 await server.register(configuracoesRoutes);
 await server.register(conversasAdminRoutes);
+
+// Rotas do painel do proprietário (owner)
+await server.register(ownerAuthRoutes);
+await server.register(ownerDashboardRoutes);
+await server.register(ownerClinicasRoutes);
+await server.register(ownerInstanciasRoutes);
 
 // Rotas de desenvolvimento — simulador de mensagens (apenas NODE_ENV=development)
 await server.register(devSimulateRoutes);

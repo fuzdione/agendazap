@@ -10,6 +10,10 @@ const CLINIC_NAME  = process.env.CLINIC_NAME  ?? 'Clínica Saúde Plena';
 const ADMIN_EMAIL  = process.env.ADMIN_EMAIL  ?? 'admin@clinicasaudeplena.com.br';
 const ADMIN_SENHA  = process.env.ADMIN_SENHA  ?? 'admin123';
 
+// Variáveis opcionais para o owner (proprietário da solução)
+const OWNER_EMAIL = process.env.OWNER_EMAIL;
+const OWNER_SENHA = process.env.OWNER_SENHA;
+
 if (!CLINIC_PHONE) {
   console.error('❌ CLINIC_PHONE não definido no .env — informe o número WhatsApp da clínica (ex: 5561999990000)');
   process.exit(1);
@@ -17,6 +21,11 @@ if (!CLINIC_PHONE) {
 
 if (ADMIN_SENHA === 'admin123' && process.env.NODE_ENV === 'production') {
   console.error('❌ ADMIN_SENHA está com o valor padrão "admin123". Defina uma senha segura no .env antes de rodar o seed em produção.');
+  process.exit(1);
+}
+
+if (OWNER_SENHA === 'admin123' && process.env.NODE_ENV === 'production') {
+  console.error('❌ OWNER_SENHA está com o valor padrão "admin123". Defina uma senha segura no .env antes de rodar o seed em produção.');
   process.exit(1);
 }
 
@@ -93,6 +102,22 @@ async function main() {
     },
   });
   console.log(`✅ Usuário admin: ${adminUser.email}`);
+
+  // Owner da solução — criado apenas se OWNER_EMAIL e OWNER_SENHA estiverem definidos no .env
+  if (OWNER_EMAIL && OWNER_SENHA) {
+    const ownerSenhaHash = await bcrypt.hash(OWNER_SENHA, 10);
+    const ownerUser = await prisma.usuarioOwner.upsert({
+      where: { email: OWNER_EMAIL },
+      update: {},
+      create: {
+        email: OWNER_EMAIL,
+        senhaHash: ownerSenhaHash,
+      },
+    });
+    console.log(`✅ Usuário owner: ${ownerUser.email}`);
+  } else {
+    console.log('⏭️  OWNER_EMAIL/OWNER_SENHA não definidos — seed do owner pulado');
+  }
 
   console.log('🎉 Seed concluído com sucesso!');
 }

@@ -28,6 +28,7 @@ vi.mock('../../config/database.js', () => ({
       findUnique: vi.fn(), // usado pelo calendarService para configJson
     },
     agendamento: {
+      findUnique: vi.fn(),
       findFirst: vi.fn(),
       findMany:  vi.fn(),
       create: vi.fn(),
@@ -126,6 +127,7 @@ function setupPrismaMocks({ estadoAtual = 'inicio', contextoJson = {} } = {}) {
   prisma.estadoConversa.update.mockResolvedValue({});
   prisma.conversa.findMany.mockResolvedValue([]);
   prisma.profissional.findMany.mockResolvedValue([PROFISSIONAL]);
+  prisma.agendamento.findUnique.mockResolvedValue({ ...AGENDAMENTO, reminderJobId: null, paciente: { optInLembrete: false } });
   prisma.agendamento.findFirst.mockResolvedValue(AGENDAMENTO);
   prisma.agendamento.findMany.mockResolvedValue([]);
   prisma.agendamento.create.mockResolvedValue({ id: 'agendamento-uuid-001' });
@@ -217,9 +219,13 @@ describe('conversationService — handleIncomingMessage: máquina de estados', (
         }),
       })
     );
+    // Após criar o agendamento, o sistema aguarda resposta de opt-in de lembrete
     expect(prisma.estadoConversa.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ estado: 'inicio', contextoJson: {} }),
+        data: expect.objectContaining({
+          estado: 'concluido',
+          contextoJson: expect.objectContaining({ aguardando_opt_in: true }),
+        }),
       })
     );
   });
@@ -242,15 +248,10 @@ describe('conversationService — handleIncomingMessage: máquina de estados', (
     expect(prisma.agendamento.create).not.toHaveBeenCalled();
   });
 
-  it('confiança baixa (<0.6) → adiciona mensagem de fallback com contato humano', async () => {
+  it('confiança baixa (<0.6) com estado "inicio" → retorna mensagem da IA sem sufixo de contato', async () => {
+    // O sufixo "recepção" só é adicionado nos estados mid-flow (escolhendo_horario, confirmando),
+    // não em "inicio" — evita poluir menus iniciais.
     setupPrismaMocks({ estadoAtual: 'inicio' });
-    processMessage.mockResolvedValueOnce(makeControle({
-      mensagemParaPaciente: 'Não entendi bem.',
-      novo_estado: 'inicio',
-      confianca: 0.4,
-    }));
-    // processMessage retorna o objeto com mensagemParaPaciente no nível errado — corrigir:
-    processMessage.mockReset();
     processMessage.mockResolvedValueOnce({
       mensagemParaPaciente: 'Não entendi bem.',
       controle: {
@@ -265,7 +266,6 @@ describe('conversationService — handleIncomingMessage: máquina de estados', (
     const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'Faz isso pra mim?', CLINICA);
 
     expect(resposta).toContain('Não entendi bem.');
-    expect(resposta).toContain('recepção');
   });
 
   it('cria paciente automaticamente se não existir no banco', async () => {
@@ -417,7 +417,7 @@ describe('conversationService — handleIncomingMessage: remarcar_agendamento', 
 
     const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'Sexta às 9h', CLINICA);
 
-    expect(resposta).toContain('reservado');
+    expect(resposta).toContain('preenchido');
     expect(prisma.agendamento.create).not.toHaveBeenCalled();
     expect(prisma.estadoConversa.update).toHaveBeenCalledWith(
       expect.objectContaining({

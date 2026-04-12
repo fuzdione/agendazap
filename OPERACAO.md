@@ -1,7 +1,8 @@
 Desenvolvimento local (o que você faz hoje pra subir o ambiente):
-docker compose up -d          → Postgres, Redis, Evolution, Adminer
-npm run dev (raiz)            → Backend Fastify  :3000
-cd admin-panel && npm run dev → Painel React      :5173 (proxy → :3000)
+docker compose up -d           → Postgres, Redis, Evolution, Adminer
+npm run dev (raiz)             → Backend Fastify        :3000
+cd admin-panel && npm run dev  → Painel admin React      :5173 (proxy → :3000)
+cd owner-panel && npm run dev  → Painel proprietário     :5174 (proxy → :3000)
   
 # AgendaZap — Guia de Operação
 
@@ -143,9 +144,41 @@ npm run dev
   ➜  Local:   http://localhost:5173/
 ```
 
-Abra `http://localhost:5173` no navegador e faça login com as credenciais definidas em `ADMIN_EMAIL` / `ADMIN_SENHA`.
+Abra `http://localhost:5173/painel` no navegador e faça login com as credenciais definidas em `ADMIN_EMAIL` / `ADMIN_SENHA`.
 
 > O painel só funciona com o servidor backend rodando (passo 1.6). As chamadas de API são proxiadas automaticamente pelo Vite para `localhost:3000`.
+
+---
+
+### 1.8 (Opcional) Criar o owner e iniciar o painel do proprietário
+
+Adicione ao `.env`:
+
+```
+OWNER_EMAIL=seu@email.com
+OWNER_SENHA=senha-forte-aqui
+OWNER_URL=http://localhost:5174
+```
+
+Rode o seed para criar o usuário owner no banco:
+
+```powershell
+cd C:\agendaZap\agendazap
+npm run db:seed
+```
+
+Instale dependências e suba o painel:
+
+```powershell
+cd C:\agendaZap\agendazap\owner-panel
+npm install
+npm run dev
+```
+
+**URL:** `http://localhost:5174/owner/login`
+**Login:** `OWNER_EMAIL` / `OWNER_SENHA`
+
+> **Atenção no Windows:** se o backend estiver rodando, pare-o antes de rodar `npm run db:seed` ou `npm run db:generate`. O Prisma não consegue atualizar o arquivo `.dll` enquanto o processo Node está com o arquivo aberto (erro EPERM). Reinicie o backend depois.
 
 ---
 
@@ -205,9 +238,23 @@ npm run dev
 ```
 
 **Quando usar:** Para acessar o painel administrativo no browser.
-**URL:** http://localhost:5173
+**URL:** http://localhost:5173/painel
 **Login:** e-mail e senha do `.env` (`ADMIN_EMAIL` / `ADMIN_SENHA`)
 **Terminal:** Deixe este terminal aberto — o Vite exibe erros de build aqui.
+
+---
+
+### 2.5a Iniciar o painel do proprietário
+
+```powershell
+cd C:\agendaZap\agendazap\owner-panel
+npm run dev
+```
+
+**Quando usar:** Para gerenciar clínicas, instâncias WhatsApp ou resetar senhas de admin.
+**URL:** http://localhost:5174/owner/login
+**Login:** `OWNER_EMAIL` / `OWNER_SENHA` do `.env`
+**Terminal:** Deixe este terminal aberto.
 
 ---
 
@@ -729,14 +776,110 @@ docker exec agendazap-postgres psql -U agendazap -d agendazap -c "UPDATE estado_
 
 ---
 
-### 8.4 Vincular Google Calendar a um profissional
+### 8.4 Conectar Google Calendar da clínica (salva o refresh_token)
+
+Este é o passo que autoriza a clínica a usar o Google Calendar. Ele gera e salva o `refresh_token` no banco — sem ele, os agendamentos não criam eventos no calendário.
+
+1. Abra a aba **Configurações**
+2. Role até a seção **"Conexão Google Calendar"**
+3. Se o status for "Não autorizado", clique em **"Autorizar acesso"**
+4. Uma nova aba abre com a tela de consentimento do Google
+5. Faça login com a conta Google **que tem os calendários dos profissionais** e clique em **Permitir**
+6. O Google redireciona de volta ao painel com status **"Autorizado"**
+
+O que acontece por baixo:
+- O backend troca o `code` retornado pelo Google pelo par `access_token` + `refresh_token`
+- O `refresh_token` é salvo na tabela `clinicas.google_refresh_token` para aquela clínica
+- A partir daí, o sistema usa o `refresh_token` para renovar o `access_token` automaticamente — sem precisar autorizar novamente
+
+> **Atenção:** cada clínica precisa fazer esta autorização individualmente com a conta Google dela. As credenciais `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET` no `.env` são globais (do app OAuth), mas o `refresh_token` é por clínica.
+
+> **Se o botão "Autorizar acesso" não aparecer:** o status já é "Autorizado" e o token está salvo. Para revogar e reautorizar, acesse `myaccount.google.com/permissions` com a conta Google da clínica, remova o acesso do app e repita o processo.
+
+---
+
+### 8.5 Vincular Google Calendar a um profissional
+
+Após a clínica ter o Google Calendar autorizado (passo 8.4), vincule o calendário a cada profissional:
 
 1. Abra a aba **Profissionais**
 2. Clique no ícone de calendário na linha do profissional
-3. O modal lista os calendários disponíveis na conta Google já conectada
-4. Selecione o calendário desejado e confirme
+3. O modal lista os calendários disponíveis na conta Google conectada
+4. Selecione o calendário do profissional e confirme
 
-> Pré-requisito: a clínica precisa ter o Google Calendar autorizado (aba **Configurações** → seção Google Calendar → botão "Autorizar").
+> Sem o calendário vinculado, o bot usa slots mockados em vez de horários reais.
+
+---
+
+## 9. PAINEL DO PROPRIETÁRIO (OWNER)
+
+Painel exclusivo para o dono da solução. Gerencia todas as clínicas sem precisar de SQL, terminal ou acesso ao servidor.
+
+**URL dev:** `http://localhost:5174/owner/login`
+**URL produção:** `https://app.meuagendazap.com.br/owner/login`
+**Login:** `OWNER_EMAIL` / `OWNER_SENHA` do `.env`
+
+### 9.1 Onboarding de uma nova clínica (fluxo completo)
+
+| Etapa | Quem faz | Onde faz |
+|---|---|---|
+| 1. Criar clínica + admin | Owner | Painel owner → Clínicas → Nova Clínica |
+| 2. Criar instância WhatsApp | Owner | Painel owner → Instâncias → Criar Instância |
+| 3. Escanear QR e conectar WhatsApp | **Admin da clínica** (tem o celular) | Painel admin → Configurações → "Ver QR Code" |
+| 4. Configurar horários e mensagem | Admin da clínica | Painel admin → Configurações |
+| 5. Cadastrar profissionais | Admin da clínica | Painel admin → Profissionais |
+| 6. (Opcional) Conectar Google Calendar | Admin da clínica | Painel admin → Configurações → "Autorizar acesso" |
+
+> Após o passo 2, o bot já está pronto para responder mensagens assim que o WhatsApp for conectado no passo 3.
+
+---
+
+### 9.2 Reconectar WhatsApp de uma clínica (suporte)
+
+Use quando uma clínica reporta que o bot parou de responder e o WhatsApp desconectou:
+
+1. Abra o painel owner → **Instâncias WhatsApp**
+2. Localize a clínica com status "Desconectado"
+3. Clique em **Ver QR Code**
+4. Compartilhe a tela com o admin da clínica (ou peça que ele faça pelo próprio painel admin → Configurações)
+5. Admin escaneia o QR com o celular: WhatsApp → Dispositivos Conectados → Conectar dispositivo
+6. O modal fecha automaticamente quando o status mudar para "open"
+
+---
+
+### 9.3 Resetar senha do admin de uma clínica
+
+Use quando o admin esqueceu a senha e não consegue logar:
+
+1. Painel owner → **Clínicas** → linha da clínica → botão **Reset Senha**
+2. Confirme a ação no modal
+3. **Anote a nova senha exibida** — ela só aparece uma vez
+4. Passe a nova senha para o admin da clínica
+5. O admin usa a nova senha para logar e pode trocar por uma de sua preferência nas configurações
+
+---
+
+### 9.4 Ativar / desativar uma clínica
+
+Desativar impede o bot de processar novas mensagens para aquele número, sem apagar nenhum dado.
+
+- **Pelo painel:** Clínicas → toggle na coluna Status (ou botão na página de detalhes)
+- Sempre exige confirmação antes de executar
+
+---
+
+### 9.5 Criar novo owner (caso precise de um segundo acesso)
+
+Não há interface para isso — crie diretamente via seed ou SQL:
+
+```powershell
+# Adicione ao .env e rode o seed (só cria se o e-mail ainda não existir):
+OWNER_EMAIL=novo@email.com
+OWNER_SENHA=senha-forte
+npm run db:seed
+```
+
+> Lembre de parar o servidor antes de rodar o seed no Windows (problema EPERM com o DLL do Prisma).
 
 ---
 

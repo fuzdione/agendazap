@@ -121,6 +121,15 @@ model UsuarioAdmin {
   @@map("usuarios_admin")
 }
 
+model UsuarioOwner {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  senhaHash String   @map("senha_hash")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("usuarios_owner")
+}
+
 enum StatusAgendamento {
   confirmado
   cancelado

@@ -21,6 +21,49 @@ O paciente conversa com um bot inteligente no WhatsApp que agenda consultas sem 
 
 ---
 
+## O que foi implementado — Etapa 7
+
+### Painel do Proprietário (owner-panel/)
+
+Painel separado para o dono da solução gerenciar todas as clínicas clientes sem precisar de SQL, terminal ou acesso ao servidor.
+
+**Backend — rotas `/owner/*`:**
+
+- **`prisma/schema.prisma`** — model `UsuarioOwner` (tabela `usuarios_owner`); credencial isolada, sem vínculo com clínica
+- **`prisma/seed.js`** — cria o owner via `OWNER_EMAIL`/`OWNER_SENHA` do `.env`; opcional — pula sem erro se ausentes
+- **`src/middleware/authenticateOwner.js`** — decorator Fastify que valida JWT com `role="owner"`; retorna 401 se token inválido ou role diferente
+- **`src/routes/owner/auth.js`** — `POST /owner/auth/login`: valida contra `usuarios_owner`, retorna JWT `{ sub, role: "owner" }` com 8h, rate limit de 5 tentativas/min
+- **`src/routes/owner/dashboard.js`** — `GET /owner/dashboard`: clínicas ativas/inativas, agendamentos hoje e na semana (todas as clínicas), status de infra (DB, Redis, Evolution API) e alertas de WhatsApp desconectado
+- **`src/routes/owner/clinicas.js`**:
+  - `GET /owner/clinicas` — listagem com paginação, filtro ativo/inativo e busca por nome/telefone
+  - `POST /owner/clinicas` — cria clínica + admin em transação atômica; valida telefone, unicidade e força mínima de senha
+  - `GET /owner/clinicas/:id` — dados completos: profissionais, contagens, status WhatsApp, status Google Calendar
+  - `PUT /owner/clinicas/:id/toggle` — ativa/desativa sem apagar dados
+  - `POST /owner/clinicas/:id/reset-senha` — gera senha aleatória de 10 chars e atualiza hash; retorna a senha uma única vez
+- **`src/routes/owner/instancias.js`**:
+  - `GET /owner/instancias` — lista todas as clínicas com status WhatsApp (Promise.allSettled, timeout 5s por clínica)
+  - `POST /owner/instancias/:clinicaId/criar` — cria instância na Evolution API
+  - `GET /owner/instancias/:clinicaId/qrcode` — retorna QR code para reconexão de suporte
+- **`src/server.js`** — CORS atualizado para incluir `OWNER_URL`; decorator `authenticateOwner` registrado; todas as rotas `/owner/*` registradas
+- **`src/config/env.js`** — `OWNER_URL` adicionado ao schema Zod (opcional)
+
+**Frontend — `owner-panel/` (React 18 + Vite + Tailwind CSS v4):**
+
+- Porta 5174, `basename="/owner"`, cores slate/zinc para distinguir do admin-panel (emerald/gray)
+- **Autenticação** — `AuthContext` com `ownerToken` em `sessionStorage`; interceptor Axios redireciona para `/owner/login` em qualquer 401
+- **Layout** — sidebar slate escuro, 3 itens: Dashboard, Clínicas, Instâncias WhatsApp
+- **Login** — mesmo padrão do admin, título "Painel do Proprietário"
+- **Dashboard** — 4 cards de métricas, painel de infraestrutura com indicadores coloridos, lista de alertas com botão "Reconectar"
+- **Clínicas** — tabela com busca, filtro e paginação; toggle ativo/inativo com confirmação; modal "Nova Clínica"; modal "Reset Senha" com campo copiável e aviso de exibição única
+- **Detalhe da Clínica** — dados completos, lista de profissionais (somente leitura), integrações, ações de toggle e reset senha
+- **Instâncias WhatsApp** — tabela com status de todas as clínicas; ações "Criar Instância" e "Ver QR Code"; modal QR com auto-refresh a cada 5s e fechamento automático ao conectar
+
+**Infra:**
+- `docker-compose.prod.yml` — `app` recebe `OWNER_URL`; `seed` recebe `OWNER_EMAIL`/`OWNER_SENHA`; nginx monta `owner-panel/dist` como volume read-only
+- `nginx/nginx.conf` — location `/owner/` para servir a SPA com `try_files`
+
+---
+
 ## O que foi implementado — Etapa 6
 
 ### Painel Administrativo (Frontend + Backend)
@@ -313,9 +356,21 @@ npm install
 npm run dev
 ```
 
-O painel abre em `http://localhost:5175`.
+O painel abre em `http://localhost:5173/painel`.
 
 Faça login com o e-mail e senha definidos em `ADMIN_EMAIL` / `ADMIN_SENHA` no `.env`.
+
+### 8. Instalar dependências e iniciar o painel do proprietário (opcional)
+
+```bash
+cd owner-panel
+npm install
+npm run dev
+```
+
+O painel abre em `http://localhost:5174/owner/login`.
+
+Faça login com `OWNER_EMAIL` / `OWNER_SENHA`. Se não tiver criado o owner ainda, adicione as variáveis ao `.env` e rode `npm run db:seed` na raiz do projeto.
 
 ---
 
@@ -416,7 +471,8 @@ Acesse `http://localhost:8080` — deve retornar a mensagem de boas-vindas da AP
 | `GOOGLE_CLIENT_ID` | Client ID do Google Cloud Console | `xxx.apps.googleusercontent.com` |
 | `GOOGLE_CLIENT_SECRET` | Client Secret do Google | `GOCSPX-...` |
 | `GOOGLE_REDIRECT_URI` | URI de callback OAuth do Google | `http://localhost:3000/admin/google/callback` |
-| `ADMIN_URL` | URL base do painel admin (CORS + redirect pós-OAuth) | `http://localhost:5175` |
+| `ADMIN_URL` | URL base do painel admin (CORS + redirect pós-OAuth) | `http://localhost:5173` |
+| `OWNER_URL` | URL base do painel do proprietário (CORS) | `http://localhost:5174` |
 | `JWT_SECRET` | Segredo para assinar tokens JWT (mín. 16 chars) | `string-longa-e-secreta` |
 | `PORT` | Porta do servidor (padrão: 3000) | `3000` |
 | `NODE_ENV` | Ambiente de execução | `development` |
@@ -424,6 +480,8 @@ Acesse `http://localhost:8080` — deve retornar a mensagem de boas-vindas da AP
 | `CLINIC_NAME` | Nome da clínica (seed) | `Clínica Saúde Plena` |
 | `ADMIN_EMAIL` | E-mail do usuário admin (seed) | `admin@clinica.com` |
 | `ADMIN_SENHA` | Senha do usuário admin (seed) | `senha-segura` |
+| `OWNER_EMAIL` | E-mail do proprietário da solução (seed, opcional) | `owner@agendazap.com` |
+| `OWNER_SENHA` | Senha do proprietário (seed, opcional) | `senha-forte` |
 
 ---
 
