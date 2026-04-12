@@ -401,9 +401,11 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
   );
 
   // 8b. Contador de mensagens incompreensíveis — escala para recepção após 3 seguidas
-  const isIncompreensivel = controle.intencao === 'outro' && controle.acao === 'nenhuma';
+  const intentosUteis = ['agendar', 'remarcar', 'cancelar', 'saudacao'];
+  const isIncompreensivel = controle.acao === 'nenhuma' && !intentosUteis.includes(controle.intencao);
   const contagemAnterior = estadoConversa.contextoJson?.tentativas_sem_entendimento ?? 0;
   const novaContagem = isIncompreensivel ? contagemAnterior + 1 : 0;
+  console.log(`[fallback] intencao=${controle.intencao} acao=${controle.acao} isIncompreensivel=${isIncompreensivel} contagem=${contagemAnterior}→${novaContagem}`);
 
   if (novaContagem !== contagemAnterior) {
     await prisma.estadoConversa.update({
