@@ -400,7 +400,30 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
     estadoConversa.contextoJson ?? {}
   );
 
-  // 8b. Normaliza a ação: se há sinal de remarcação e dados completos, força remarcar_agendamento
+  // 8b. Contador de mensagens incompreensíveis — escala para recepção após 3 seguidas
+  const isIncompreensivel = controle.intencao === 'outro' && (controle.confianca ?? 1.0) < 0.4;
+  const contagemAnterior = estadoConversa.contextoJson?.tentativas_sem_entendimento ?? 0;
+  const novaContagem = isIncompreensivel ? contagemAnterior + 1 : 0;
+
+  if (novaContagem !== contagemAnterior) {
+    await prisma.estadoConversa.update({
+      where: { telefone_clinicaId: { telefone, clinicaId } },
+      data: { contextoJson: { ...contextoAtualizado, tentativas_sem_entendimento: novaContagem } },
+    });
+  }
+
+  if (novaContagem >= 3) {
+    await prisma.estadoConversa.update({
+      where: { telefone_clinicaId: { telefone, clinicaId } },
+      data: { estado: 'inicio', contextoJson: {} },
+    });
+    const telefoneFallback = clinica.configJson?.telefone_fallback || clinica.telefone || '';
+    return telefoneFallback
+      ? `Não estou conseguindo entender sua solicitação. Para atendimento, ligue para ${telefoneFallback}. 🙏`
+      : 'Não estou conseguindo entender sua solicitação. Entre em contato com nossa recepção pelo telefone da clínica. 🙏';
+  }
+
+  // 8c. Normaliza a ação: se há sinal de remarcação e dados completos, força remarcar_agendamento
   // Cobre dois casos:
   //   (a) modelo retornou criar_agendamento mas agendamento_id está no contexto acumulado
   //   (b) modelo declarou intencao=remarcar mas usou criar_agendamento por erro
@@ -729,27 +752,6 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
       : '\n\nSe preferir, entre em contato com nossa recepção pelo telefone da clínica.';
     respostaFinal = respostaFinal + sufixo;
   }*/
-
-    // 8c. Se confiança muito baixa e paciente já está no meio do fluxo, sugere contato humano.
-    // Só aplica a partir de escolhendo_horario para não poluir menus iniciais e seleções por número.
-    const estadosMidFlow = ['escolhendo_horario', 'confirmando'];
-    if (estadosMidFlow.includes(estadoConversa.estado) && (controle.confianca ?? 1.0) < 0.5) {
-      const telefoneClinica = clinica.configJson?.telefone_fallback || clinica.telefone || '';
-
-      // Evita duplicar mensagem de contato caso a IA já tenha incluído
-      const jaTemContato =
-        respostaFinal.toLowerCase().includes('recepção') ||
-        respostaFinal.toLowerCase().includes('ligue') ||
-        respostaFinal.toLowerCase().includes('telefone');
-
-      if (!jaTemContato) {
-        const sufixo = telefoneClinica
-          ? `\n\nSe preferir, ligue para ${telefoneClinica} para falar com nossa recepção.`
-          : '\n\nSe preferir, entre em contato com nossa recepção pelo telefone da clínica.';
-
-        respostaFinal += sufixo;
-      }
-    }
 
   return respostaFinal;
 }
