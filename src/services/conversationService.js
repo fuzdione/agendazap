@@ -442,6 +442,20 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
 
   let respostaFinal = mensagemParaPaciente;
 
+  // 8d. Garante exibição dos horários ao transitar para escolhendo_horario.
+  // O modelo às vezes apenas ecoa o nome do profissional sem listar os slots.
+  // Sempre que o estado novo for escolhendo_horario e houver profissional_id,
+  // verificamos se a resposta já contém horários (marcador "📅"); caso contrário, anexamos.
+  if (
+    controle.novo_estado === 'escolhendo_horario' &&
+    contextoAtualizado.profissional_id &&
+    !respostaFinal.includes('📅')
+  ) {
+    const slotsFormatados = formatarSlotsParaMensagem(horariosDisponiveis, contextoAtualizado.profissional_id);
+    respostaFinal = `${respostaFinal}\n\n${slotsFormatados}`;
+    console.log(`[slots] horários injetados pelo código para profissional ${contextoAtualizado.profissional_id}`);
+  }
+
   if (acaoEfetiva === 'criar_agendamento' && dadosAgendamentoCompletos(contextoAtualizado)) {
     const profissional = profissionais.find((p) => p.id === contextoAtualizado.profissional_id);
 
