@@ -64,7 +64,14 @@ export async function scheduleReminderIfNeeded(agendamentoId) {
   const dataHoraMs = agendamento.dataHora.getTime();
   const diferencaMs = dataHoraMs - agora;
 
-  // Só enfileira agora se ocorre em menos de 25h; caso contrário, o cron horário cuidará
+  // Consulta em menos de 4h: paciente acabou de agendar, lembrete é desnecessário
+  const MIN_ANTECEDENCIA_MS = 4 * 60 * 60 * 1000;
+  if (diferencaMs < MIN_ANTECEDENCIA_MS) {
+    console.log(`[reminderService] agendamento ${agendamentoId} ocorre em menos de 4h — lembrete não enviado`);
+    return;
+  }
+
+  // Consulta em mais de 25h: cron horário cuidará do agendamento
   if (diferencaMs > 25 * 60 * 60 * 1000) {
     console.log(`[reminderService] agendamento ${agendamentoId} ocorre em mais de 25h — cron horário enfileirará`);
     return;
@@ -72,7 +79,16 @@ export async function scheduleReminderIfNeeded(agendamentoId) {
 
   // Calcula momento do lembrete = dataHora - 24h, ajustado para dia útil
   const momentoLembrete = ajustarParaDiaUtil(new Date(dataHoraMs - 24 * 60 * 60 * 1000));
-  const delay = Math.max(0, momentoLembrete.getTime() - agora);
+
+  // Se a janela de 24h já passou, aplica delay mínimo de 1h para evitar disparo imediato
+  const DELAY_MINIMO_MS = 60 * 60 * 1000;
+  const delayIdeal = momentoLembrete.getTime() - agora;
+  const delay = delayIdeal >= 0 ? delayIdeal : DELAY_MINIMO_MS;
+
+  if (delayIdeal < 0) {
+    console.log(`[reminderService] janela de 24h já passou — aplicando delay mínimo de 1h`);
+  }
+
   const jobId = `reminder-${agendamentoId}`;
 
   await remindersQueue.add('send-reminder', { agendamentoId }, { jobId, delay });
