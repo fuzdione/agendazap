@@ -184,7 +184,7 @@ export default function Agendamentos() {
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {agendamentos.map((ag) => {
-                    const st = STATUS_CONFIG[ag.status];
+                    const st = STATUS_CONFIG[ag.status] ?? { label: ag.status, cls: 'bg-gray-100 text-gray-700' };
                     const acoes = ACOES_POR_STATUS[ag.status] ?? [];
                     return (
                       <tr key={ag.id} className="hover:bg-gray-50 transition-colors">
