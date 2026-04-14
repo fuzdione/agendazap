@@ -286,8 +286,8 @@ async function handleOptInLembrete(clinicaId, telefone, mensagemTexto, contexto,
     data: { optInLembrete: optIn },
   });
 
-  // Agenda o lembrete se opt-in ativo
-  if (agendamentoId) {
+  // Agenda o lembrete apenas se opt-in ativo
+  if (agendamentoId && optIn) {
     await scheduleReminderIfNeeded(agendamentoId);
   }
 

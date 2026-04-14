@@ -113,6 +113,9 @@ Quando o paciente escolher o horário, faça esta pergunta antes de confirmar:
 - Nunca use "acao": "criar_agendamento" apenas porque o nome foi informado — é obrigatório mostrar o resumo e receber "sim" do paciente`
     : 'Primeiro contato deste telefone. Ao escolher o horário, pergunte o nome completo com linguagem de transição (ex: "Ótimo! Para confirmar, qual o seu nome completo?"). Após receber o nome, exiba o resumo completo (profissional, data, horário, nome) e aguarde confirmação explícita ("sim", "confirmo") antes de usar "acao": "criar_agendamento".';
 
+  // Regra de nome completo — injetada no bloco de identificação
+  const regraNomeCompleto = `\nRegra de nome completo: qualquer nome com pelo menos duas palavras (ex: "Silvano Alves", "João Silva") é considerado nome completo. Não peça mais informações nem confirme se "está correto" — apenas registre e prossiga para o resumo de confirmação.`;
+
   const mensagemBoasVindas = clinica.configJson?.mensagem_boas_vindas;
   const telefoneFallback = clinica.configJson?.telefone_fallback;
 
@@ -136,7 +139,7 @@ Hoje é ${agoraBrasilia}. Ao interpretar datas mencionadas pelo paciente e ao ge
 - Use "agendada", "confirmada" ou "marcada" somente após coletar todos os dados necessários e ao executar acao = "criar_agendamento". Enquanto ainda houver perguntas pendentes (nome, confirmação), use linguagem de transição: "Ótimo! Antes de confirmar..." ou "Quase lá! Só preciso saber...".
 
 ## IDENTIFICAÇÃO DO PACIENTE
-${identificacaoPaciente}
+${identificacaoPaciente}${regraNomeCompleto}
 
 ## PROFISSIONAIS E ESPECIALIDADES DISPONÍVEIS
 ${listaProfissionais || '  (nenhum profissional cadastrado)'}
@@ -178,7 +181,7 @@ Formato correto para numeração: 1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣ (e nã
 ## SELEÇÃO POR NÚMERO
 Quando o paciente responder com um número simples (ex: "1", "2", "3") ou emoji number (ex: "1️⃣", "2️⃣"):
 - Se o estado for "inicio" e o menu exibido foi o de opções (agendar/remarcar/cancelar): 1=agendar, 2=remarcar, 3=cancelar.
-- Se o estado for "escolhendo_especialidade" e a lista exibida foi a de profissionais: resolva para o profissional correspondente na lista da seção PROFISSIONAIS E ESPECIALIDADES, extraia o profissional_id correto e TRANSCREVA na sua resposta ao paciente as linhas de horários disponíveis desse profissional que constam na seção HORÁRIOS DISPONÍVEIS acima — os horários não são visíveis ao paciente, você precisa copiá-los explicitamente para o texto da resposta. Não diga "vou verificar" nem "aguarde" nem "aqui estão os horários" sem realmente listá-los.
+- Se o estado for "escolhendo_especialidade" e a lista exibida foi a de profissionais: resolva para o profissional correspondente na lista da seção PROFISSIONAIS E ESPECIALIDADES, extraia o profissional_id correto e TRANSCREVA OBRIGATORIAMENTE na mesma mensagem as linhas de horários disponíveis desse profissional que constam na seção HORÁRIOS DISPONÍVEIS acima — os horários NÃO são visíveis ao paciente, você DEVE copiá-los explicitamente para o texto da resposta. Nunca responda apenas com o nome do profissional escolhido. Nunca diga "vou verificar", "aguarde" ou "aqui estão os horários" sem realmente listá-los na mesma mensagem.
 - Quando há uma lista numerada ativa no contexto, interprete sempre números simples como seleção dessa lista.
 
 ## FLUXO ESPERADO
