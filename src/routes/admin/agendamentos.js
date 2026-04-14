@@ -1,5 +1,5 @@
 import { prisma } from '../../config/database.js';
-import { deleteEvent } from '../../services/calendarService.js';
+import { deleteEvent, patchEventTitle } from '../../services/calendarService.js';
 import { remindersQueue } from '../../config/queues.js';
 
 /**
@@ -20,7 +20,7 @@ export async function agendamentosAdminRoutes(fastify) {
           data_inicio:     { type: 'string' },
           data_fim:        { type: 'string' },
           profissional_id: { type: 'string' },
-          status:          { type: 'string', enum: ['confirmado', 'cancelado', 'concluido', 'no_show'] },
+          status:          { type: 'string', enum: ['agendado', 'confirmado', 'cancelado', 'concluido', 'no_show'] },
           page:            { type: 'integer', minimum: 1, default: 1 },
           limit:           { type: 'integer', minimum: 1, maximum: 100, default: 20 },
         },
@@ -75,7 +75,7 @@ export async function agendamentosAdminRoutes(fastify) {
         type: 'object',
         required: ['status'],
         properties: {
-          status: { type: 'string', enum: ['confirmado', 'cancelado', 'concluido', 'no_show'] },
+          status: { type: 'string', enum: ['agendado', 'confirmado', 'cancelado', 'concluido', 'no_show'] },
         },
       },
     },
@@ -90,6 +90,20 @@ export async function agendamentosAdminRoutes(fastify) {
 
     if (!agendamento) {
       return reply.status(404).send({ success: false, error: 'Agendamento não encontrado' });
+    }
+
+    // Ao confirmar manualmente: atualiza título do evento no Google Calendar
+    if (status === 'confirmado' && agendamento.calendarEventId) {
+      const paciente = await prisma.paciente.findUnique({
+        where: { id: agendamento.pacienteId },
+        select: { nome: true },
+      });
+      await patchEventTitle(
+        clinicaId,
+        agendamento.profissionalId,
+        agendamento.calendarEventId,
+        `✅ Consulta confirmada: ${paciente?.nome ?? 'Paciente'}`
+      );
     }
 
     // Ao cancelar: limpa evento do Calendar e job de lembrete

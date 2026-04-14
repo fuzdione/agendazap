@@ -50,7 +50,7 @@ export async function scheduleReminderIfNeeded(agendamentoId) {
     return;
   }
 
-  if (agendamento.status !== 'confirmado') {
+  if (!['agendado', 'confirmado'].includes(agendamento.status)) {
     console.log(`[reminderService] agendamento ${agendamentoId} status=${agendamento.status} — sem lembrete`);
     return;
   }

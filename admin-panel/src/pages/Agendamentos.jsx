@@ -5,6 +5,7 @@ import { ptBR } from 'date-fns/locale';
 import { Search, Filter } from 'lucide-react';
 
 const STATUS_CONFIG = {
+  agendado:   { label: 'Agendado',   cls: 'bg-yellow-100 text-yellow-700' },
   confirmado: { label: 'Confirmado', cls: 'bg-emerald-100 text-emerald-700' },
   cancelado:  { label: 'Cancelado',  cls: 'bg-red-100 text-red-700' },
   concluido:  { label: 'Concluído',  cls: 'bg-blue-100 text-blue-700' },
@@ -12,6 +13,7 @@ const STATUS_CONFIG = {
 };
 
 const ACOES_POR_STATUS = {
+  agendado:   ['confirmado', 'cancelado'],
   confirmado: ['concluido', 'no_show', 'cancelado'],
   concluido:  [],
   no_show:    [],
@@ -19,15 +21,17 @@ const ACOES_POR_STATUS = {
 };
 
 const LABEL_ACAO = {
-  concluido: 'Concluir',
-  no_show:   'No-show',
-  cancelado: 'Cancelar',
+  confirmado: 'Confirmar',
+  concluido:  'Concluir',
+  no_show:    'No-show',
+  cancelado:  'Cancelar',
 };
 
 const COR_ACAO = {
-  concluido: 'bg-blue-50 text-blue-700 hover:bg-blue-100',
-  no_show:   'bg-orange-50 text-orange-700 hover:bg-orange-100',
-  cancelado: 'bg-red-50 text-red-700 hover:bg-red-100',
+  confirmado: 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
+  concluido:  'bg-blue-50 text-blue-700 hover:bg-blue-100',
+  no_show:    'bg-orange-50 text-orange-700 hover:bg-orange-100',
+  cancelado:  'bg-red-50 text-red-700 hover:bg-red-100',
 };
 
 export default function Agendamentos() {

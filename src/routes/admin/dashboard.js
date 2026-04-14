@@ -56,7 +56,7 @@ export async function dashboardRoutes(fastify) {
         where: {
           clinicaId,
           dataHora: { gte: agora },
-          status: { in: ['confirmado'] },
+          status: { in: ['agendado', 'confirmado'] },
         },
         orderBy: { dataHora: 'asc' },
         take: 5,
@@ -70,7 +70,7 @@ export async function dashboardRoutes(fastify) {
     // Taxa de confirmação: (confirmados + concluídos) / total dos últimos 30 dias
     const total30 = agendamentos30Dias.length;
     const confirmados30 = agendamentos30Dias.filter(
-      (a) => a.status === 'confirmado' || a.status === 'concluido',
+      (a) => ['agendado', 'confirmado', 'concluido'].includes(a.status),
     ).length;
     const taxaConfirmacao = total30 > 0 ? Math.round((confirmados30 / total30) * 100) : 0;
 

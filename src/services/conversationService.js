@@ -1,6 +1,6 @@
 import { prisma } from '../config/database.js';
 import { buildSystemPrompt, processMessage } from './aiService.js';
-import { getAvailableSlots as getCalendarSlots, createEvent, checkConflict, deleteEvent } from './calendarService.js';
+import { getAvailableSlots as getCalendarSlots, createEvent, checkConflict, deleteEvent, patchEventTitle } from './calendarService.js';
 import { scheduleReminderIfNeeded, cancelReminder } from './reminderService.js';
 
 // Quantidade máxima de mensagens do histórico enviadas ao Claude
@@ -164,7 +164,7 @@ async function criarAgendamento(clinicaId, paciente, contexto, profissional) {
       pacienteId: pacienteParaAgendar.id,
       dataHora: new Date(contexto.data_hora),
       duracaoMin: profissional?.duracaoConsultaMin ?? 30,
-      status: 'confirmado',
+      status: 'agendado',
       // calendarEventId é preenchido logo após a criação do evento no Google Calendar
     },
   });
@@ -183,11 +183,22 @@ async function handleRespostaLembrete(clinicaId, telefone, mensagemTexto, contex
 
   // Opção 1 — confirmar presença
   if (['1', 'sim', 'confirmo', 'confirmar'].includes(msg)) {
+    if (agendamentoId) {
+      const ag = await prisma.agendamento.update({
+        where: { id: agendamentoId },
+        data: { status: 'confirmado' },
+        select: { clinicaId: true, profissionalId: true, calendarEventId: true, paciente: { select: { nome: true } } },
+      });
+      if (ag.calendarEventId) {
+        const nomePaciente = ag.paciente?.nome ?? 'Paciente';
+        await patchEventTitle(ag.clinicaId, ag.profissionalId, ag.calendarEventId, `✅ Consulta confirmada: ${nomePaciente}`);
+      }
+    }
     await prisma.estadoConversa.update({
       where: { telefone_clinicaId: { telefone, clinicaId } },
       data: { estado: 'inicio', contextoJson: {} },
     });
-    return 'Ótimo! Te esperamos. 😊';
+    return 'Ótimo! Presença confirmada. Te esperamos. 😊';
   }
 
   // Opção 2 — remarcar

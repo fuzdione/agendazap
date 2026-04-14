@@ -26,7 +26,7 @@ export const reminderScannerWorker = new Worker(
     const agendamentos = await prisma.agendamento.findMany({
       where: {
         dataHora: { gte: dataMin, lte: dataMax },
-        status: 'confirmado',
+        status: { in: ['agendado', 'confirmado'] },
         lembreteEnviadoAt: null,
         paciente: { optInLembrete: true },
       },

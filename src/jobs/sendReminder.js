@@ -32,7 +32,7 @@ export const sendReminderWorker = new Worker(
       console.log(`[sendReminder] agendamento ${agendamentoId} não encontrado — ignorando`);
       return;
     }
-    if (agendamento.status !== 'confirmado') {
+    if (!['agendado', 'confirmado'].includes(agendamento.status)) {
       console.log(`[sendReminder] agendamento ${agendamentoId} status=${agendamento.status} — ignorando`);
       return;
     }

@@ -17,7 +17,8 @@ export const checkReminderResponseWorker = new Worker(
       return;
     }
 
-    if (agendamento.status !== 'confirmado') {
+    // Se o paciente já confirmou, cancelou ou teve outro desfecho, não há nada a fazer
+    if (agendamento.status !== 'agendado') {
       console.log(`[checkReminderResponse] agendamento ${agendamentoId} status=${agendamento.status} — paciente já agiu, ignorando`);
       return;
     }

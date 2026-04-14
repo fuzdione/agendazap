@@ -67,7 +67,7 @@ model Agendamento {
   pacienteId       String            @map("paciente_id")
   dataHora         DateTime          @map("data_hora")
   duracaoMin       Int               @default(30) @map("duracao_min")
-  status           StatusAgendamento @default(confirmado)
+  status           StatusAgendamento @default(agendado)
   calendarEventId   String?           @map("calendar_event_id")
   lembreteEnviadoAt DateTime?         @map("lembrete_enviado_at")
   reminderJobId     String?           @map("reminder_job_id")
@@ -131,6 +131,7 @@ model UsuarioOwner {
 }
 
 enum StatusAgendamento {
+  agendado
   confirmado
   cancelado
   concluido

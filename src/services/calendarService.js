@@ -143,6 +143,41 @@ export async function createEvent(clinicaId, profissionalId, agendamento) {
 }
 
 /**
+ * Atualiza apenas o título (summary) de um evento existente no Google Calendar.
+ * Usado para marcar visualmente a consulta como confirmada pelo paciente.
+ * Falhas não são propagadas — a confirmação no banco já é suficiente.
+ *
+ * @param {string} clinicaId
+ * @param {string} profissionalId
+ * @param {string} calendarEventId
+ * @param {string} novoTitulo
+ */
+export async function patchEventTitle(clinicaId, profissionalId, calendarEventId, novoTitulo) {
+  if (!calendarEventId) return;
+
+  const profissional = await prisma.profissional.findUnique({
+    where: { id: profissionalId },
+  });
+
+  if (!profissional?.calendarId) return;
+
+  try {
+    const auth = await getAuthenticatedClient(clinicaId);
+    const calendar = google.calendar({ version: 'v3', auth });
+
+    await calendar.events.patch({
+      calendarId: profissional.calendarId,
+      eventId: calendarEventId,
+      requestBody: { summary: novoTitulo },
+    });
+
+    console.log(`✅ [calendarService] título do evento ${calendarEventId} atualizado: "${novoTitulo}"`);
+  } catch (err) {
+    console.error(`[calendarService] falha ao atualizar título do evento ${calendarEventId}: ${err.message}`);
+  }
+}
+
+/**
  * Remove um evento do Google Calendar (usado quando o paciente cancela o agendamento).
  *
  * @param {string} clinicaId
