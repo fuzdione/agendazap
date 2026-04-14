@@ -68,6 +68,7 @@ model Agendamento {
   dataHora         DateTime          @map("data_hora")
   duracaoMin       Int               @default(30) @map("duracao_min")
   status           StatusAgendamento @default(agendado)
+  confirmedBy      String?           @map("confirmed_by")
   calendarEventId   String?           @map("calendar_event_id")
   lembreteEnviadoAt DateTime?         @map("lembrete_enviado_at")
   reminderJobId     String?           @map("reminder_job_id")

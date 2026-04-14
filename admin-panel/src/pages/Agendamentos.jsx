@@ -204,6 +204,11 @@ export default function Agendamentos() {
                           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${st.cls}`}>
                             {st.label}
                           </span>
+                          {ag.status === 'confirmado' && ag.confirmedBy && (
+                            <span className={`ml-1 px-1.5 py-0.5 rounded text-xs ${ag.confirmedBy === 'paciente' ? 'bg-sky-50 text-sky-600' : 'bg-violet-50 text-violet-600'}`}>
+                              {ag.confirmedBy === 'paciente' ? '📱 paciente' : '🖥️ admin'}
+                            </span>
+                          )}
                         </td>
                         <td className="px-5 py-3">
                           <div className="flex flex-wrap gap-1">

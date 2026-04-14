@@ -92,7 +92,7 @@ export async function agendamentosAdminRoutes(fastify) {
       return reply.status(404).send({ success: false, error: 'Agendamento não encontrado' });
     }
 
-    // Ao confirmar manualmente: atualiza título do evento no Google Calendar
+    // Ao confirmar manualmente: registra origem e atualiza título no Google Calendar
     if (status === 'confirmado' && agendamento.calendarEventId) {
       const paciente = await prisma.paciente.findUnique({
         where: { id: agendamento.pacienteId },
@@ -102,7 +102,7 @@ export async function agendamentosAdminRoutes(fastify) {
         clinicaId,
         agendamento.profissionalId,
         agendamento.calendarEventId,
-        `✅ Consulta confirmada: ${paciente?.nome ?? 'Paciente'}`
+        `✅ Confirmado pelo admin: ${paciente?.nome ?? 'Paciente'}`
       );
     }
 
@@ -128,7 +128,7 @@ export async function agendamentosAdminRoutes(fastify) {
 
     const atualizado = await prisma.agendamento.update({
       where: { id },
-      data: { status },
+      data: { status, ...(status === 'confirmado' ? { confirmedBy: 'admin' } : {}) },
       include: {
         paciente:    { select: { nome: true, telefone: true } },
         profissional: { select: { nome: true, especialidade: true } },

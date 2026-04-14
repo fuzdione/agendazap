@@ -186,12 +186,12 @@ async function handleRespostaLembrete(clinicaId, telefone, mensagemTexto, contex
     if (agendamentoId) {
       const ag = await prisma.agendamento.update({
         where: { id: agendamentoId },
-        data: { status: 'confirmado' },
+        data: { status: 'confirmado', confirmedBy: 'paciente' },
         select: { clinicaId: true, profissionalId: true, calendarEventId: true, paciente: { select: { nome: true } } },
       });
       if (ag.calendarEventId) {
         const nomePaciente = ag.paciente?.nome ?? 'Paciente';
-        await patchEventTitle(ag.clinicaId, ag.profissionalId, ag.calendarEventId, `✅ Consulta confirmada: ${nomePaciente}`);
+        await patchEventTitle(ag.clinicaId, ag.profissionalId, ag.calendarEventId, `✅ Confirmado pelo paciente: ${nomePaciente}`);
       }
     }
     await prisma.estadoConversa.update({
