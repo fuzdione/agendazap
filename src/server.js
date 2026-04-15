@@ -50,10 +50,10 @@ await server.register(jwt, {
   secret: env.JWT_SECRET,
 });
 
-// Rate limiting global — protege especialmente o endpoint de login
+// Rate limiting global — usa store in-memory (adequado para instância única)
+// Redis não é usado aqui para evitar que falhas de conexão Redis quebrem o login
 await server.register(rateLimit, {
-  global: false, // aplica só onde explicitamente configurado
-  redis,         // usa Redis para persistir contadores entre instâncias/reinicializações
+  global: false,
 });
 
 // Decorator de autenticação para admins de clínica
