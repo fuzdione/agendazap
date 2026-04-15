@@ -5,6 +5,7 @@ import { ptBR } from 'date-fns/locale';
 import { CalendarDays, CalendarCheck2, TrendingUp, Clock } from 'lucide-react';
 
 const STATUS_LABEL = {
+  agendado:   { label: 'Agendado',   cls: 'bg-yellow-100 text-yellow-700' },
   confirmado: { label: 'Confirmado', cls: 'bg-emerald-100 text-emerald-700' },
   cancelado:  { label: 'Cancelado',  cls: 'bg-red-100 text-red-700' },
   concluido:  { label: 'Concluído',  cls: 'bg-blue-100 text-blue-700' },
@@ -126,7 +127,7 @@ export default function Dashboard() {
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {dados.proximosAgendamentos.map((ag) => {
-                  const st = STATUS_LABEL[ag.status];
+                  const st = STATUS_LABEL[ag.status] ?? { label: ag.status, cls: 'bg-gray-100 text-gray-700' };
                   return (
                     <tr key={ag.id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-5 py-3 whitespace-nowrap">
