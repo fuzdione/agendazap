@@ -42,7 +42,6 @@ export function ajustarParaDiaUtil(dataHoraLembrete) {
 export async function scheduleReminderIfNeeded(agendamentoId) {
   const agendamento = await prisma.agendamento.findUnique({
     where: { id: agendamentoId },
-    include: { paciente: true },
   });
 
   if (!agendamento) {
@@ -52,11 +51,6 @@ export async function scheduleReminderIfNeeded(agendamentoId) {
 
   if (!['agendado', 'confirmado'].includes(agendamento.status)) {
     console.log(`[reminderService] agendamento ${agendamentoId} status=${agendamento.status} — sem lembrete`);
-    return;
-  }
-
-  if (!agendamento.paciente.optInLembrete) {
-    console.log(`[reminderService] paciente ${agendamento.pacienteId} sem opt-in — lembrete não agendado`);
     return;
   }
 

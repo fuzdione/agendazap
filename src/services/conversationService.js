@@ -273,42 +273,6 @@ async function handleRespostaLembrete(clinicaId, telefone, mensagemTexto, contex
   return 'Desculpe, não entendi. Responda com 1, 2 ou 3.';
 }
 
-/**
- * Processa a resposta do paciente à pergunta de opt-in de lembrete,
- * feita logo após a confirmação do agendamento (estado concluido + aguardando_opt_in).
- */
-async function handleOptInLembrete(clinicaId, telefone, mensagemTexto, contexto, paciente) {
-  const msg = mensagemTexto.trim().toLowerCase();
-  const agendamentoId = contexto.agendamento_id;
-
-  let optIn = true; // default — mantém opt-in se não reconhecido
-  let resposta = 'Tudo certo! Mantivemos o lembrete ativado. Até logo! 😊';
-
-  if (['1', 'sim', 'quero', 'ok', 's'].some((w) => msg === w || msg.startsWith(w + ' '))) {
-    optIn = true;
-    resposta = 'Ótimo! Você receberá um lembrete 24h antes da consulta. 😊';
-  } else if (['2', 'não', 'nao', 'obrigado', 'n'].some((w) => msg === w || msg.startsWith(w + ' '))) {
-    optIn = false;
-    resposta = 'Entendido! Não enviaremos lembretes. Até logo! 😊';
-  }
-
-  await prisma.paciente.update({
-    where: { id: paciente.id },
-    data: { optInLembrete: optIn },
-  });
-
-  // Agenda o lembrete apenas se opt-in ativo
-  if (agendamentoId && optIn) {
-    await scheduleReminderIfNeeded(agendamentoId);
-  }
-
-  await prisma.estadoConversa.update({
-    where: { telefone_clinicaId: { telefone, clinicaId } },
-    data: { estado: 'inicio', contextoJson: {} },
-  });
-
-  return resposta;
-}
 
 /**
  * Orquestrador central do fluxo de conversa.
@@ -362,11 +326,6 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
   // 2a. Tratamento do estado aguardando_resposta_lembrete — interpreta diretamente sem chamar IA
   if (estadoConversa.estado === 'aguardando_resposta_lembrete') {
     return handleRespostaLembrete(clinicaId, telefone, mensagemTexto, estadoConversa.contextoJson ?? {}, paciente, pacientesDoTelefone);
-  }
-
-  // 2b. Tratamento do opt-in de lembrete após confirmação de agendamento
-  if (estadoConversa.estado === 'concluido' && estadoConversa.contextoJson?.aguardando_opt_in) {
-    return handleOptInLembrete(clinicaId, telefone, mensagemTexto, estadoConversa.contextoJson, paciente);
   }
 
   // 3. Busca o histórico recente (últimas N mensagens em ordem cronológica)
@@ -537,19 +496,16 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
     }
 
     if (agendamentoCriado) {
-      // Salva estado concluido aguardando resposta de opt-in de lembrete
+      // Agenda lembrete automático para todos
+      if (agendamentoCriadoId) {
+        await scheduleReminderIfNeeded(agendamentoCriadoId);
+      }
+
       await prisma.estadoConversa.update({
         where: { telefone_clinicaId: { telefone, clinicaId } },
-        data: {
-          estado: 'concluido',
-          contextoJson: { aguardando_opt_in: true, agendamento_id: agendamentoCriadoId },
-        },
+        data: { estado: 'concluido', contextoJson: {} },
       });
-      respostaFinal =
-        mensagemParaPaciente +
-        '\n\nDeseja receber um lembrete automático aqui no WhatsApp 24h antes da consulta?\n' +
-        '1️⃣ Sim, quero o lembrete\n' +
-        '2️⃣ Não, obrigado';
+      respostaFinal = mensagemParaPaciente;
     } else {
       // Mantém o estado em confirmando para o paciente poder tentar de novo
       respostaFinal =

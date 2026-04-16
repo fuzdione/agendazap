@@ -28,7 +28,6 @@ export const reminderScannerWorker = new Worker(
         dataHora: { gte: dataMin, lte: dataMax },
         status: { in: ['agendado', 'confirmado'] },
         lembreteEnviadoAt: null,
-        paciente: { optInLembrete: true },
       },
       include: { paciente: { select: { id: true, telefone: true } } },
     });
