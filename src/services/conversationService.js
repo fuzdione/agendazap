@@ -328,6 +328,16 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
     return handleRespostaLembrete(clinicaId, telefone, mensagemTexto, estadoConversa.contextoJson ?? {}, paciente, pacientesDoTelefone);
   }
 
+  // 2b. Estado concluido — reseta para inicio para o Claude não arrastar contexto da marcação anterior
+  if (estadoConversa.estado === 'concluido') {
+    await prisma.estadoConversa.update({
+      where: { telefone_clinicaId: { telefone, clinicaId } },
+      data: { estado: 'inicio', contextoJson: {} },
+    });
+    estadoConversa.estado = 'inicio';
+    estadoConversa.contextoJson = {};
+  }
+
   // 3. Busca o histórico recente (últimas N mensagens em ordem cronológica)
   const historico = (await prisma.conversa.findMany({
     where: { clinicaId, telefone },
