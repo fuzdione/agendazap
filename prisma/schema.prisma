@@ -23,6 +23,7 @@ model Clinica {
   conversas       Conversa[]
   estadosConversa EstadoConversa[]
   usuariosAdmin   UsuarioAdmin[]
+  convenios       Convenio[]
 
   @@map("clinicas")
 }
@@ -34,11 +35,13 @@ model Profissional {
   especialidade       String
   calendarId          String?  @map("calendar_id")
   duracaoConsultaMin  Int      @default(30) @map("duracao_consulta_min")
+  atendeParticular    Boolean  @default(true) @map("atende_particular")
   ativo               Boolean  @default(true)
   createdAt           DateTime @default(now()) @map("created_at")
 
-  clinica      Clinica       @relation(fields: [clinicaId], references: [id], onDelete: Cascade)
+  clinica      Clinica                @relation(fields: [clinicaId], references: [id], onDelete: Cascade)
   agendamentos Agendamento[]
+  convenios    ProfissionalConvenio[]
 
   @@map("profissionais")
 }
@@ -74,9 +77,13 @@ model Agendamento {
   reminderJobId     String?           @map("reminder_job_id")
   createdAt         DateTime          @default(now()) @map("created_at")
 
+  tipoConsulta     TipoConsultaEnum  @default(particular) @map("tipo_consulta")
+  convenioId       String?           @map("convenio_id")
+
   clinica      Clinica      @relation(fields: [clinicaId], references: [id], onDelete: Cascade)
   profissional Profissional @relation(fields: [profissionalId], references: [id], onDelete: Cascade)
   paciente     Paciente     @relation(fields: [pacienteId], references: [id], onDelete: Cascade)
+  convenio     Convenio?    @relation(fields: [convenioId], references: [id], onDelete: SetNull)
 
   @@map("agendamentos")
 }
@@ -147,8 +154,40 @@ enum DirecaoMensagem {
 enum EstadoBot {
   inicio
   escolhendo_especialidade
+  escolhendo_convenio
   escolhendo_horario
   confirmando
   concluido
   aguardando_resposta_lembrete
+}
+
+enum TipoConsultaEnum {
+  particular
+  convenio
+}
+
+model Convenio {
+  id        String   @id @default(uuid())
+  clinicaId String   @map("clinica_id")
+  nome      String
+  ativo     Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  clinica       Clinica                @relation(fields: [clinicaId], references: [id], onDelete: Cascade)
+  profissionais ProfissionalConvenio[]
+  agendamentos  Agendamento[]
+
+  @@unique([clinicaId, nome])
+  @@map("convenios")
+}
+
+model ProfissionalConvenio {
+  profissionalId String @map("profissional_id")
+  convenioId     String @map("convenio_id")
+
+  profissional Profissional @relation(fields: [profissionalId], references: [id], onDelete: Cascade)
+  convenio     Convenio     @relation(fields: [convenioId], references: [id], onDelete: Cascade)
+
+  @@id([profissionalId, convenioId])
+  @@map("profissional_convenio")
 }

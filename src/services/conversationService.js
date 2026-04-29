@@ -110,15 +110,26 @@ async function atualizarEstadoConversa(clinicaId, telefone, novoEstado, dadosExt
 
 /**
  * Verifica se todos os dados necessários para criar um agendamento estão presentes.
+ * Quando tipo_consulta = "convenio", convenio_nome também é obrigatório.
  * @param {object} contexto
+ * @param {boolean} temConvenios - Se a clínica possui convênios ativos
  * @returns {boolean}
  */
-function dadosAgendamentoCompletos(contexto) {
-  return Boolean(
+function dadosAgendamentoCompletos(contexto, temConvenios = false) {
+  const basico = Boolean(
     contexto.profissional_id &&
     contexto.data_hora &&
     contexto.nome_paciente
   );
+  if (!basico) return false;
+
+  // Se a clínica tem convênios, o tipo de consulta deve estar definido
+  if (temConvenios && !contexto.tipo_consulta) return false;
+
+  // Se for convênio, o nome do convênio também é obrigatório
+  if (contexto.tipo_consulta === 'convenio' && !contexto.convenio_nome) return false;
+
+  return true;
 }
 
 /**
@@ -128,8 +139,9 @@ function dadosAgendamentoCompletos(contexto) {
  * @param {object} paciente
  * @param {object} contexto - Contexto acumulado com dados_extraidos
  * @param {object} profissional - Profissional correspondente ao profissional_id
+ * @param {Array} conveniosClinica - Lista de convênios ativos da clínica (para resolver convenioId)
  */
-async function criarAgendamento(clinicaId, paciente, contexto, profissional) {
+async function criarAgendamento(clinicaId, paciente, contexto, profissional, conveniosClinica = []) {
   const nomePaciente = contexto.nome_paciente;
 
   // Determina o paciente correto para o agendamento (pode ser um familiar diferente)
@@ -157,6 +169,20 @@ async function criarAgendamento(clinicaId, paciente, contexto, profissional) {
     }
   }
 
+  // Resolve convenioId a partir do nome informado pelo paciente
+  let convenioId = null;
+  if (contexto.tipo_consulta === 'convenio' && contexto.convenio_nome) {
+    const convenioEncontrado = conveniosClinica.find(
+      (c) => c.nome.toLowerCase() === contexto.convenio_nome.toLowerCase()
+    );
+    convenioId = convenioEncontrado?.id ?? null;
+    if (!convenioId) {
+      console.warn(`[criarAgendamento] convênio não encontrado: "${contexto.convenio_nome}"`);
+    }
+  }
+
+  const tipoConsulta = contexto.tipo_consulta === 'convenio' ? 'convenio' : 'particular';
+
   const agendamento = await prisma.agendamento.create({
     data: {
       clinicaId,
@@ -165,6 +191,8 @@ async function criarAgendamento(clinicaId, paciente, contexto, profissional) {
       dataHora: new Date(contexto.data_hora),
       duracaoMin: profissional?.duracaoConsultaMin ?? 30,
       status: 'agendado',
+      tipoConsulta,
+      convenioId,
       // calendarEventId é preenchido logo após a criação do evento no Google Calendar
     },
   });
@@ -345,17 +373,34 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
     take: MAX_HISTORY,
   })).reverse();
 
-  // 4. Busca profissionais ativos da clínica
-  const profissionais = await prisma.profissional.findMany({
+  // 4. Busca profissionais ativos da clínica (com convênios vinculados)
+  const profissionaisRaw = await prisma.profissional.findMany({
+    where: { clinicaId, ativo: true },
+    orderBy: { nome: 'asc' },
+    include: {
+      convenios: {
+        include: { convenio: { select: { id: true, nome: true, ativo: true } } },
+      },
+    },
+  });
+  // Flatten convenios para cada profissional
+  const profissionais = profissionaisRaw.map((p) => ({
+    ...p,
+    convenios: p.convenios.map((pc) => pc.convenio),
+  }));
+
+  // 4a. Busca convênios ativos da clínica (para o system prompt e validações)
+  const conveniosClinica = await prisma.convenio.findMany({
     where: { clinicaId, ativo: true },
     orderBy: { nome: 'asc' },
   });
+  const temConveniosNaClinica = conveniosClinica.length > 0;
 
   // 5. Obtém horários disponíveis via Google Calendar (com fallback para mock)
   const horariosDisponiveis = await getAvailableSlots(clinicaId, profissionais);
 
   // 6. Monta o system prompt com todo o contexto
-  const systemPrompt = buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoConversa, nomesConhecidos, agendamentosAtivos);
+  const systemPrompt = buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoConversa, nomesConhecidos, agendamentosAtivos, conveniosClinica);
 
   // 7. Chama o Claude para interpretar a mensagem e gerar a resposta
   const { mensagemParaPaciente, controle } = await processMessage(
@@ -436,7 +481,7 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
     console.log(`[slots] horários injetados pelo código para profissional ${contextoAtualizado.profissional_id}`);
   }
 
-  if (acaoEfetiva === 'criar_agendamento' && dadosAgendamentoCompletos(contextoAtualizado)) {
+  if (acaoEfetiva === 'criar_agendamento' && dadosAgendamentoCompletos(contextoAtualizado, temConveniosNaClinica)) {
     const profissional = profissionais.find((p) => p.id === contextoAtualizado.profissional_id);
 
     // Guarda das: profissional_id pode ter chegado como nome ou UUID inválido
@@ -482,7 +527,7 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
     let agendamentoCriado = false;
     let agendamentoCriadoId = null;
     try {
-      const agendamento = await criarAgendamento(clinicaId, paciente, contextoAtualizado, profissional);
+      const agendamento = await criarAgendamento(clinicaId, paciente, contextoAtualizado, profissional, conveniosClinica);
       agendamentoCriado = true;
       agendamentoCriadoId = agendamento.id;
 
@@ -523,7 +568,7 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
         'Por favor, tente confirmar novamente ou entre em contato com a recepção. 🙏';
     }
 
-  } else if (acaoEfetiva === 'remarcar_agendamento' && dadosAgendamentoCompletos(contextoAtualizado)) {
+  } else if (acaoEfetiva === 'remarcar_agendamento' && dadosAgendamentoCompletos(contextoAtualizado, temConveniosNaClinica)) {
     // Ponto 2: log do contexto ao entrar no fluxo de remarcação
     console.log(`[remarcar_agendamento] contexto=${JSON.stringify(contextoAtualizado)}`);
 
@@ -605,7 +650,7 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
     let remarcacaoConcluida = false;
     let novoAgendamentoId = null;
     try {
-      const novoAgendamento = await criarAgendamento(clinicaId, paciente, contextoAtualizado, profissional);
+      const novoAgendamento = await criarAgendamento(clinicaId, paciente, contextoAtualizado, profissional, conveniosClinica);
       console.log(`✅ [remarcar_agendamento] novo agendamento criado: ${novoAgendamento.id}`);
       remarcacaoConcluida = true;
       novoAgendamentoId = novoAgendamento.id;

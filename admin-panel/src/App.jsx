@@ -7,6 +7,7 @@ import Agendamentos from './pages/Agendamentos.jsx';
 import Profissionais from './pages/Profissionais.jsx';
 import Configuracoes from './pages/Configuracoes.jsx';
 import Conversas from './pages/Conversas.jsx';
+import Convenios from './pages/Convenios.jsx';
 
 function PrivateRoute({ children }) {
   const { isAuthenticated } = useAuth();
@@ -35,6 +36,7 @@ function AppRoutes() {
         <Route path="profissionais" element={<Profissionais />} />
         <Route path="configuracoes" element={<Configuracoes />} />
         <Route path="conversas" element={<Conversas />} />
+        <Route path="convenios" element={<Convenios />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -14,6 +14,7 @@ import { authRoutes } from './routes/auth/login.js';
 import { dashboardRoutes } from './routes/admin/dashboard.js';
 import { agendamentosAdminRoutes } from './routes/admin/agendamentos.js';
 import { profissionaisCrudRoutes } from './routes/admin/profissionaisCrud.js';
+import { conveniosRoutes } from './routes/admin/convenios.js';
 import { configuracoesRoutes } from './routes/admin/configuracoes.js';
 import { conversasAdminRoutes } from './routes/admin/conversas.js';
 import { ownerAuthRoutes } from './routes/owner/auth.js';
@@ -108,6 +109,7 @@ await server.register(authRoutes);
 await server.register(dashboardRoutes);
 await server.register(agendamentosAdminRoutes);
 await server.register(profissionaisCrudRoutes);
+await server.register(conveniosRoutes);
 await server.register(configuracoesRoutes);
 await server.register(conversasAdminRoutes);
 

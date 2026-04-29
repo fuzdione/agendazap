@@ -51,6 +51,7 @@ export async function agendamentosAdminRoutes(fastify) {
         include: {
           paciente:    { select: { nome: true, telefone: true, email: true } },
           profissional: { select: { nome: true, especialidade: true } },
+          convenio:    { select: { id: true, nome: true } },
         },
       }),
     ]);
@@ -132,6 +133,7 @@ export async function agendamentosAdminRoutes(fastify) {
       include: {
         paciente:    { select: { nome: true, telefone: true } },
         profissional: { select: { nome: true, especialidade: true } },
+        convenio:    { select: { id: true, nome: true } },
       },
     });
 

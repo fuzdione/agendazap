@@ -8,6 +8,7 @@ import {
   LogOut,
   Menu,
   X,
+  HeartPulse,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -16,6 +17,7 @@ const navItems = [
   { to: '/',               label: 'Dashboard',     icon: LayoutDashboard, end: true },
   { to: '/agendamentos',   label: 'Agendamentos',   icon: Calendar },
   { to: '/profissionais',  label: 'Profissionais',  icon: Users },
+  { to: '/convenios',      label: 'Convênios',      icon: HeartPulse },
   { to: '/configuracoes',  label: 'Configurações',  icon: Settings },
   { to: '/conversas',      label: 'Conversas',      icon: MessageSquare },
 ];

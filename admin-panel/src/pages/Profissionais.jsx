@@ -3,19 +3,23 @@ import { api } from '../services/api.js';
 import { Plus, Pencil, Trash2, Link, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 
-const INICIAL = { nome: '', especialidade: '', duracaoConsultaMin: 30, ativo: true };
+const INICIAL = { nome: '', especialidade: '', duracaoConsultaMin: 30, atendeParticular: true, ativo: true };
 
 export default function Profissionais() {
   const { clinica } = useAuth();
   const [profissionais, setProfissionais] = useState([]);
+  const [conveniosClinica, setConveniosClinica] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modalAberto, setModalAberto] = useState(false);
-  const [modalCalendar, setModalCalendar] = useState(null); // profissional selecionado para vinculação
+  const [modalCalendar, setModalCalendar] = useState(null);
+  const [modalConvenios, setModalConvenios] = useState(null); // profissional para gerenciar convênios
   const [calendarios, setCalendarios] = useState([]);
   const [carregandoCal, setCarregandoCal] = useState(false);
   const [form, setForm] = useState(INICIAL);
   const [editandoId, setEditandoId] = useState(null);
+  const [conveniosSelecionados, setConveniosSelecionados] = useState([]); // IDs selecionados no modal de convênios
   const [salvando, setSalvando] = useState(false);
+  const [salvandoConvenios, setSalvandoConvenios] = useState(false);
   const [erro, setErro] = useState('');
 
   useEffect(() => {
@@ -25,10 +29,14 @@ export default function Profissionais() {
   async function carregar() {
     try {
       setLoading(true);
-      const { data } = await api.get('/admin/profissionais');
-      setProfissionais(data.data);
+      const [{ data: profData }, { data: convData }] = await Promise.all([
+        api.get('/admin/profissionais'),
+        api.get('/admin/convenios'),
+      ]);
+      setProfissionais(profData.data);
+      setConveniosClinica(convData.data.filter((c) => c.ativo));
     } catch {
-      setErro('Erro ao carregar profissionais');
+      setErro('Erro ao carregar dados');
     } finally {
       setLoading(false);
     }
@@ -41,6 +49,7 @@ export default function Profissionais() {
         nome: profissional.nome,
         especialidade: profissional.especialidade,
         duracaoConsultaMin: profissional.duracaoConsultaMin,
+        atendeParticular: profissional.atendeParticular !== false,
         ativo: profissional.ativo,
       });
     } else {
@@ -105,6 +114,34 @@ export default function Profissionais() {
     }
   }
 
+  function abrirModalConvenios(profissional) {
+    setModalConvenios(profissional);
+    setConveniosSelecionados((profissional.convenios ?? []).map((c) => c.id));
+    setErro('');
+  }
+
+  function toggleConvenio(id) {
+    setConveniosSelecionados((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  }
+
+  async function salvarConvenios() {
+    if (!modalConvenios) return;
+    setSalvandoConvenios(true);
+    try {
+      await api.put(`/admin/profissionais/${modalConvenios.id}/convenios`, {
+        convenioIds: conveniosSelecionados,
+      });
+      setModalConvenios(null);
+      await carregar();
+    } catch {
+      setErro('Erro ao salvar convênios');
+    } finally {
+      setSalvandoConvenios(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -143,9 +180,17 @@ export default function Profissionais() {
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-gray-900 truncate">{p.nome}</p>
                   <p className="text-xs text-gray-500">{p.especialidade} · {p.duracaoConsultaMin} min</p>
-                  {p.calendarId && (
-                    <p className="text-xs text-emerald-600 mt-0.5">Google Calendar vinculado</p>
-                  )}
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {p.atendeParticular !== false && (
+                      <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">Particular</span>
+                    )}
+                    {(p.convenios ?? []).map((c) => (
+                      <span key={c.id} className="text-xs bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded">{c.nome}</span>
+                    ))}
+                    {p.calendarId && (
+                      <span className="text-xs bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded">Calendar</span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Status */}
@@ -157,6 +202,15 @@ export default function Profissionais() {
 
                 {/* Ações */}
                 <div className="flex items-center gap-2">
+                  {conveniosClinica.length > 0 && (
+                    <button
+                      onClick={() => abrirModalConvenios(p)}
+                      title="Gerenciar convênios"
+                      className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors text-xs font-medium"
+                    >
+                      Conv.
+                    </button>
+                  )}
                   <button
                     onClick={() => abrirModalCalendar(p)}
                     title="Vincular Google Calendar"
@@ -237,6 +291,16 @@ export default function Profissionais() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="atendeParticular"
+                  checked={form.atendeParticular}
+                  onChange={(e) => setForm((p) => ({ ...p, atendeParticular: e.target.checked }))}
+                  className="w-4 h-4 accent-emerald-600"
+                />
+                <label htmlFor="atendeParticular" className="text-sm text-gray-700">Atende particular</label>
+              </div>
               {editandoId && (
                 <div className="flex items-center gap-2">
                   <input
@@ -266,6 +330,51 @@ export default function Profissionais() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal convênios do profissional */}
+      {modalConvenios && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-gray-900">Convênios atendidos</h2>
+              <button onClick={() => setModalConvenios(null)} className="text-gray-400 hover:text-gray-600">
+                <X size={20} />
+              </button>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">
+              Selecione os convênios que <strong>{modalConvenios.nome}</strong> atende:
+            </p>
+            <div className="space-y-2 mb-5">
+              {conveniosClinica.map((c) => (
+                <label key={c.id} className="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-gray-50">
+                  <input
+                    type="checkbox"
+                    checked={conveniosSelecionados.includes(c.id)}
+                    onChange={() => toggleConvenio(c.id)}
+                    className="w-4 h-4 accent-purple-600"
+                  />
+                  <span className="text-sm text-gray-800">{c.nome}</span>
+                </label>
+              ))}
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setModalConvenios(null)}
+                className="flex-1 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={salvarConvenios}
+                disabled={salvandoConvenios}
+                className="flex-1 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white text-sm font-medium rounded-lg transition-colors"
+              >
+                {salvandoConvenios ? 'Salvando...' : 'Salvar'}
+              </button>
+            </div>
           </div>
         </div>
       )}

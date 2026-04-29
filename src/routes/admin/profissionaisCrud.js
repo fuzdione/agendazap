@@ -30,9 +30,22 @@ export async function profissionaisCrudRoutes(fastify) {
     const profissionais = await prisma.profissional.findMany({
       where,
       orderBy: { nome: 'asc' },
+      include: {
+        convenios: {
+          include: {
+            convenio: { select: { id: true, nome: true, ativo: true } },
+          },
+        },
+      },
     });
 
-    return reply.send({ success: true, data: profissionais });
+    // Flatten: substitui relação aninhada por lista simples de convênios
+    const data = profissionais.map((p) => ({
+      ...p,
+      convenios: p.convenios.map((pc) => pc.convenio),
+    }));
+
+    return reply.send({ success: true, data });
   });
 
   /**
@@ -48,18 +61,19 @@ export async function profissionaisCrudRoutes(fastify) {
           nome:                { type: 'string', minLength: 1 },
           especialidade:       { type: 'string', minLength: 1 },
           duracaoConsultaMin:  { type: 'integer', minimum: 5, default: 30 },
+          atendeParticular:    { type: 'boolean' },
         },
       },
     },
   }, async (request, reply) => {
     const clinicaId = request.user.clinicaId;
-    const { nome, especialidade, duracaoConsultaMin = 30 } = request.body;
+    const { nome, especialidade, duracaoConsultaMin = 30, atendeParticular = true } = request.body;
 
     const profissional = await prisma.profissional.create({
-      data: { clinicaId, nome, especialidade, duracaoConsultaMin, ativo: true },
+      data: { clinicaId, nome, especialidade, duracaoConsultaMin, atendeParticular, ativo: true },
     });
 
-    return reply.status(201).send({ success: true, data: profissional });
+    return reply.status(201).send({ success: true, data: { ...profissional, convenios: [] } });
   });
 
   /**
@@ -74,6 +88,7 @@ export async function profissionaisCrudRoutes(fastify) {
           nome:               { type: 'string', minLength: 1 },
           especialidade:      { type: 'string', minLength: 1 },
           duracaoConsultaMin: { type: 'integer', minimum: 5 },
+          atendeParticular:   { type: 'boolean' },
           ativo:              { type: 'boolean' },
         },
         additionalProperties: false,
@@ -94,9 +109,17 @@ export async function profissionaisCrudRoutes(fastify) {
     const atualizado = await prisma.profissional.update({
       where: { id },
       data: request.body,
+      include: {
+        convenios: {
+          include: { convenio: { select: { id: true, nome: true, ativo: true } } },
+        },
+      },
     });
 
-    return reply.send({ success: true, data: atualizado });
+    return reply.send({
+      success: true,
+      data: { ...atualizado, convenios: atualizado.convenios.map((pc) => pc.convenio) },
+    });
   });
 
   /**

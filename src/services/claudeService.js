@@ -51,12 +51,29 @@ function extractPatientMessage(text) {
  * @param {object} estadoConversa - Registro atual de estado_conversa (pode ser null)
  * @returns {string}
  */
-export function buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoConversa, nomesConhecidos = [], agendamentos = []) {
+export function buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoConversa, nomesConhecidos = [], agendamentos = [], conveniosClinica = []) {
   // Limita a 3 nomes mais recentes para evitar mensagens longas e confusas ao paciente
   nomesConhecidos = nomesConhecidos.slice(-3);
+
+  // Prepara índice de convênios por profissional para montar lista enriquecida
+  const conveniosPorProfissional = {};
+  for (const p of profissionais) {
+    const conveniosDoProf = (p.convenios ?? []).map((c) => c.nome).filter(Boolean);
+    conveniosPorProfissional[p.id] = conveniosDoProf;
+  }
+
+  // Convênios ativos da clínica (lista global)
+  const conveniosAtivos = conveniosClinica.filter((c) => c.ativo);
+  const temConvenios = conveniosAtivos.length > 0;
+
   // Formata a lista de profissionais e especialidades — UUID incluído para extração correta pelo modelo
   const listaProfissionais = profissionais
-    .map((p, i) => `  ${i + 1}. ${p.nome} — ${p.especialidade} (consulta de ${p.duracaoConsultaMin} min) [id: ${p.id}]`)
+    .map((p, i) => {
+      const conv = conveniosPorProfissional[p.id] ?? [];
+      const infoConvenio = conv.length > 0 ? ` | convênios: ${conv.join(', ')}` : '';
+      const infoParticular = p.atendeParticular !== false ? ' | atende: particular' : '';
+      return `  ${i + 1}. ${p.nome} — ${p.especialidade} (${p.duracaoConsultaMin} min)${infoParticular}${infoConvenio} [id: ${p.id}]`;
+    })
     .join('\n');
 
   // Formata os horários disponíveis por profissional
@@ -141,6 +158,11 @@ Hoje é ${agoraBrasilia}. Ao interpretar datas mencionadas pelo paciente e ao ge
 ## IDENTIFICAÇÃO DO PACIENTE
 ${identificacaoPaciente}${regraNomeCompleto}
 
+## CONVÊNIOS ACEITOS PELA CLÍNICA
+${temConvenios
+  ? conveniosAtivos.map((c) => `  - ${c.nome}`).join('\n')
+  : '  Esta clínica não trabalha com convênios — atendimento apenas particular.'}
+
 ## PROFISSIONAIS E ESPECIALIDADES DISPONÍVEIS
 ${listaProfissionais || '  (nenhum profissional cadastrado)'}
 
@@ -185,7 +207,32 @@ Quando o paciente responder com um número simples (ex: "1", "2", "3") ou emoji 
 - Quando há uma lista numerada ativa no contexto, interprete sempre números simples como seleção dessa lista.
 
 ## FLUXO ESPERADO
-inicio → escolhendo_especialidade → escolhendo_horario → confirmando → concluido → volta para inicio
+${temConvenios
+  ? 'inicio → escolhendo_especialidade → escolhendo_convenio → escolhendo_horario → confirmando → concluido → volta para inicio'
+  : 'inicio → escolhendo_especialidade → escolhendo_horario → confirmando → concluido → volta para inicio'}
+
+${temConvenios ? `## PERGUNTA SOBRE CONVÊNIO (obrigatória antes de mostrar horários)
+Após o paciente escolher o profissional, pergunte ANTES de exibir horários:
+"A consulta será pelo plano ou particular? 😊
+1️⃣ Particular
+2️⃣ Convênio"
+
+Se o paciente responder "Convênio" (ou "2"):
+- Pergunte qual convênio: "Qual o seu plano de saúde?"
+- Liste os convênios aceitos pela clínica (seção CONVÊNIOS ACEITOS acima)
+- Se o convênio informado for aceito E o profissional escolhido atender aquele convênio → prossiga para horários com tipo_consulta = "convenio" e convenio_nome = nome do convênio
+- Se o convênio NÃO for aceito → informe: "Infelizmente não trabalhamos com este plano. Os planos aceitos são: [lista]. Deseja agendar como particular?" e aguarde resposta
+- Se o convênio for aceito mas o profissional não atender aquele convênio → informe: "O [profissional] não atende [convênio], mas você pode agendar como particular ou escolher outro profissional"
+
+Se o paciente responder "Particular" (ou "1"):
+- tipo_consulta = "particular", prossiga direto para horários
+
+Estado durante escolha do tipo/convênio: "escolhendo_convenio"` : ''}
+
+## CONFIRMAÇÃO DO AGENDAMENTO
+Ao exibir o resumo de confirmação, inclua sempre o tipo de atendimento. Exemplos:
+- Particular: "✅ Confirmação: Dr. João Silva | Clínico Geral | 30/04 às 10h | Particular | Nome: João"
+- Convênio: "✅ Confirmação: Dra. Maria Santos | Dermatologia | 30/04 às 14h | Convênio: Amil | Nome: Maria"
 
 ## BLOCO JSON DE CONTROLE — OBRIGATÓRIO EM TODA RESPOSTA
 Toda resposta deve terminar com um bloco JSON entre as tags <json></json>, inclusive confirmações finais, encerramentos e respostas curtas.
@@ -195,10 +242,12 @@ O JSON deve seguir exatamente este formato:
 <json>
 {
   "intencao": "agendar|remarcar|cancelar|duvida|saudacao|outro",
-  "novo_estado": "inicio|escolhendo_especialidade|escolhendo_horario|confirmando|concluido",
+  "novo_estado": "inicio|escolhendo_especialidade|escolhendo_convenio|escolhendo_horario|confirmando|concluido",
   "dados_extraidos": {
     "especialidade": "string ou null",
     "profissional_id": "UUID do profissional ou null",
+    "tipo_consulta": "particular|convenio ou null",
+    "convenio_nome": "nome do convênio (ex: Amil) ou null",
     "data_hora": "ISO string (ex: 2026-03-30T09:00:00-03:00) ou null",
     "nome_paciente": "string ou null",
     "agendamento_id": "UUID do agendamento a remarcar/cancelar (da lista acima) ou null"
@@ -216,6 +265,8 @@ Regras para o JSON:
 - "confianca" é um número entre 0.0 e 1.0 indicando sua certeza sobre a interpretação da mensagem.
 - Preserve os dados já extraídos em turnos anteriores (disponíveis no contexto acumulado acima).
 - Se o paciente escolher por número ou abreviação, resolva para o nome/id correto.
+${temConvenios ? `- Se a clínica não tiver convênios, não pergunte sobre tipo de consulta — use tipo_consulta: "particular" por padrão.
+- Quando tipo_consulta = "convenio", o campo convenio_nome é obrigatório para criar/remarcar agendamento.` : ''}
 
 Sua resposta só estará completa quando incluir o bloco <json>...</json> ao final.`;
 }
@@ -251,8 +302,11 @@ export async function processMessage(messageText, systemPrompt, recentHistory, e
     dados_extraidos: {
       especialidade: null,
       profissional_id: null,
+      tipo_consulta: null,
+      convenio_nome: null,
       data_hora: null,
       nome_paciente: null,
+      agendamento_id: null,
     },
     acao: 'nenhuma',
     confianca: 0.0,

@@ -66,11 +66,13 @@ async function main() {
     where: { clinicaId: clinica.id },
   });
 
+  let profissionais = [];
+
   if (totalProfissionais === 0) {
     const profissionaisData = [
-      { nome: 'Dr. João Silva', especialidade: 'Clínico Geral', duracaoConsultaMin: 30 },
-      { nome: 'Dra. Maria Santos', especialidade: 'Dermatologia', duracaoConsultaMin: 40 },
-      { nome: 'Dra. Ana Costa', especialidade: 'Nutrição', duracaoConsultaMin: 50 },
+      { nome: 'Dr. João Silva', especialidade: 'Clínico Geral', duracaoConsultaMin: 30, atendeParticular: true },
+      { nome: 'Dra. Maria Santos', especialidade: 'Dermatologia', duracaoConsultaMin: 40, atendeParticular: true },
+      { nome: 'Dra. Ana Costa', especialidade: 'Nutrição', duracaoConsultaMin: 50, atendeParticular: true },
     ];
 
     for (const dados of profissionaisData) {
@@ -80,13 +82,57 @@ async function main() {
           nome: dados.nome,
           especialidade: dados.especialidade,
           duracaoConsultaMin: dados.duracaoConsultaMin,
+          atendeParticular: dados.atendeParticular,
           ativo: true,
         },
       });
+      profissionais.push(profissional);
       console.log(`✅ Profissional criado: ${profissional.nome} — ${profissional.especialidade}`);
     }
   } else {
     console.log(`⏭️  Profissionais já cadastrados (${totalProfissionais}) — seed pulou criação`);
+    profissionais = await prisma.profissional.findMany({ where: { clinicaId: clinica.id, ativo: true } });
+  }
+
+  // Convênios de exemplo — só cria se ainda não existirem para esta clínica
+  const totalConvenios = await prisma.convenio.count({ where: { clinicaId: clinica.id } });
+  if (totalConvenios === 0 && profissionais.length > 0) {
+    const conveniosData = ['Amil', 'Bradesco Saúde', 'Unimed'];
+    const conveniosCriados = [];
+
+    for (const nome of conveniosData) {
+      const convenio = await prisma.convenio.create({
+        data: { clinicaId: clinica.id, nome, ativo: true },
+      });
+      conveniosCriados.push(convenio);
+      console.log(`✅ Convênio criado: ${convenio.nome}`);
+    }
+
+    // Vinculação variada: cada profissional atende convênios diferentes
+    // Prof 0 (Clínico Geral): Amil + Unimed
+    // Prof 1 (Dermatologia): Bradesco Saúde + Unimed
+    // Prof 2 (Nutrição): apenas Amil
+    const vinculos = [
+      { profIdx: 0, convIdx: 0 }, // Clínico Geral ↔ Amil
+      { profIdx: 0, convIdx: 2 }, // Clínico Geral ↔ Unimed
+      { profIdx: 1, convIdx: 1 }, // Dermatologia ↔ Bradesco Saúde
+      { profIdx: 1, convIdx: 2 }, // Dermatologia ↔ Unimed
+      { profIdx: 2, convIdx: 0 }, // Nutrição ↔ Amil
+    ];
+
+    for (const v of vinculos) {
+      if (profissionais[v.profIdx] && conveniosCriados[v.convIdx]) {
+        await prisma.profissionalConvenio.create({
+          data: {
+            profissionalId: profissionais[v.profIdx].id,
+            convenioId: conveniosCriados[v.convIdx].id,
+          },
+        });
+      }
+    }
+    console.log('✅ Vínculos profissional↔convênio criados');
+  } else {
+    console.log(`⏭️  Convênios já cadastrados (${totalConvenios}) — seed pulou criação`);
   }
 
   // Usuário admin do painel — criado via upsert para ser idempotente.

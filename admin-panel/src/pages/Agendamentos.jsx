@@ -177,6 +177,7 @@ export default function Agendamentos() {
                     <th className="px-5 py-3 font-medium">Data / Hora</th>
                     <th className="px-5 py-3 font-medium">Paciente</th>
                     <th className="px-5 py-3 font-medium">Profissional</th>
+                    <th className="px-5 py-3 font-medium">Tipo</th>
                     <th className="px-5 py-3 font-medium">Duração</th>
                     <th className="px-5 py-3 font-medium">Status</th>
                     <th className="px-5 py-3 font-medium">Ações</th>
@@ -198,6 +199,17 @@ export default function Agendamentos() {
                         <td className="px-5 py-3">
                           <p>{ag.profissional?.nome}</p>
                           <p className="text-xs text-gray-400">{ag.profissional?.especialidade}</p>
+                        </td>
+                        <td className="px-5 py-3 whitespace-nowrap">
+                          {ag.tipoConsulta === 'convenio' ? (
+                            <span className="text-xs bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded font-medium">
+                              {ag.convenio?.nome ?? 'Convênio'}
+                            </span>
+                          ) : (
+                            <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-medium">
+                              Particular
+                            </span>
+                          )}
                         </td>
                         <td className="px-5 py-3 text-gray-500">{ag.duracaoMin} min</td>
                         <td className="px-5 py-3">
