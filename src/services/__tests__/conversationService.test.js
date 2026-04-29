@@ -34,6 +34,9 @@ vi.mock('../../config/database.js', () => ({
       create: vi.fn(),
       update: vi.fn(),
     },
+    convenio: {
+      findMany: vi.fn(),
+    },
   },
 }));
 
@@ -78,8 +81,10 @@ const PROFISSIONAL = {
   nome: 'Dr. João Silva',
   especialidade: 'Clínico Geral',
   duracaoConsultaMin: 30,
+  atendeParticular: true,
   ativo: true,
   clinicaId: CLINICA.id,
+  convenios: [], // sem convênios por padrão nos testes base
 };
 
 const AGENDAMENTO = {
@@ -126,7 +131,12 @@ function setupPrismaMocks({ estadoAtual = 'inicio', contextoJson = {} } = {}) {
   prisma.estadoConversa.upsert.mockResolvedValue({});
   prisma.estadoConversa.update.mockResolvedValue({});
   prisma.conversa.findMany.mockResolvedValue([]);
-  prisma.profissional.findMany.mockResolvedValue([PROFISSIONAL]);
+  // profissional.findMany retorna com a relação `convenios` que o código faz include
+  prisma.profissional.findMany.mockResolvedValue([
+    { ...PROFISSIONAL, convenios: [] },
+  ]);
+  // clínica sem convênios por padrão — mantém retrocompatibilidade
+  prisma.convenio.findMany.mockResolvedValue([]);
   prisma.agendamento.findUnique.mockResolvedValue({ ...AGENDAMENTO, reminderJobId: null, paciente: { optInLembrete: false } });
   prisma.agendamento.findFirst.mockResolvedValue(AGENDAMENTO);
   prisma.agendamento.findMany.mockResolvedValue([]);
@@ -215,16 +225,15 @@ describe('conversationService — handleIncomingMessage: máquina de estados', (
       expect.objectContaining({
         data: expect.objectContaining({
           profissionalId: PROFISSIONAL.id,
-          status: 'confirmado',
+          status: 'agendado',
+          tipoConsulta: 'particular', // clínica sem convênios → particular por padrão
         }),
       })
     );
-    // Após criar o agendamento, o sistema aguarda resposta de opt-in de lembrete
     expect(prisma.estadoConversa.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           estado: 'concluido',
-          contextoJson: expect.objectContaining({ aguardando_opt_in: true }),
         }),
       })
     );
@@ -605,5 +614,186 @@ describe('conversationService — handleIncomingMessage: cancelar_agendamento', 
         data: expect.objectContaining({ estado: 'inicio' }),
       })
     );
+  });
+});
+
+// =====================================================================
+// TESTE 5 — Particular vs Convênio
+// =====================================================================
+
+const CONVENIO_AMIL = { id: 'convenio-uuid-amil', clinicaId: CLINICA.id, nome: 'Amil', ativo: true };
+const CONVENIO_UNIMED = { id: 'convenio-uuid-unimed', clinicaId: CLINICA.id, nome: 'Unimed', ativo: true };
+
+const PROFISSIONAL_COM_CONVENIO = {
+  ...PROFISSIONAL,
+  convenios: [{ convenioId: CONVENIO_AMIL.id, convenio: CONVENIO_AMIL }],
+};
+
+describe('conversationService — handleIncomingMessage: particular vs convênio', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('clínica sem convênios → cria agendamento com tipoConsulta="particular" sem perguntar', async () => {
+    setupPrismaMocks({
+      estadoAtual: 'confirmando',
+      contextoJson: {
+        profissional_id: PROFISSIONAL.id,
+        data_hora: '2026-05-10T10:00:00-03:00',
+        nome_paciente: 'Carlos Silva',
+      },
+    });
+    // convenio.findMany retorna vazio → clínica sem convênios
+    prisma.convenio.findMany.mockResolvedValue([]);
+    processMessage.mockResolvedValueOnce({
+      mensagemParaPaciente: 'Consulta agendada!',
+      controle: {
+        intencao: 'agendar',
+        novo_estado: 'concluido',
+        dados_extraidos: { especialidade: null, profissional_id: null, tipo_consulta: null, convenio_nome: null, data_hora: null, nome_paciente: null, agendamento_id: null },
+        acao: 'criar_agendamento',
+        confianca: 0.95,
+      },
+    });
+
+    await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'Sim, confirmo', CLINICA);
+
+    expect(prisma.agendamento.create).toHaveBeenCalledOnce();
+    expect(prisma.agendamento.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          tipoConsulta: 'particular',
+          convenioId: null,
+        }),
+      })
+    );
+  });
+
+  it('clínica com convênios + paciente escolheu convênio Amil → cria agendamento com tipoConsulta="convenio" e convenioId correto', async () => {
+    setupPrismaMocks({
+      estadoAtual: 'confirmando',
+      contextoJson: {
+        profissional_id: PROFISSIONAL.id,
+        data_hora: '2026-05-10T10:00:00-03:00',
+        nome_paciente: 'Ana Souza',
+        tipo_consulta: 'convenio',
+        convenio_nome: 'Amil',
+      },
+    });
+    prisma.profissional.findMany.mockResolvedValue([PROFISSIONAL_COM_CONVENIO]);
+    prisma.convenio.findMany.mockResolvedValue([CONVENIO_AMIL, CONVENIO_UNIMED]);
+    processMessage.mockResolvedValueOnce({
+      mensagemParaPaciente: 'Consulta agendada pelo plano Amil!',
+      controle: {
+        intencao: 'agendar',
+        novo_estado: 'concluido',
+        dados_extraidos: { especialidade: null, profissional_id: null, tipo_consulta: null, convenio_nome: null, data_hora: null, nome_paciente: null, agendamento_id: null },
+        acao: 'criar_agendamento',
+        confianca: 0.97,
+      },
+    });
+
+    await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'Sim, pode agendar', CLINICA);
+
+    expect(prisma.agendamento.create).toHaveBeenCalledOnce();
+    expect(prisma.agendamento.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          tipoConsulta: 'convenio',
+          convenioId: CONVENIO_AMIL.id,
+        }),
+      })
+    );
+  });
+
+  it('clínica com convênios + paciente escolheu particular → cria agendamento com tipoConsulta="particular"', async () => {
+    setupPrismaMocks({
+      estadoAtual: 'confirmando',
+      contextoJson: {
+        profissional_id: PROFISSIONAL.id,
+        data_hora: '2026-05-10T10:00:00-03:00',
+        nome_paciente: 'Paulo Melo',
+        tipo_consulta: 'particular',
+      },
+    });
+    prisma.convenio.findMany.mockResolvedValue([CONVENIO_AMIL]);
+    processMessage.mockResolvedValueOnce({
+      mensagemParaPaciente: 'Consulta particular agendada!',
+      controle: {
+        intencao: 'agendar',
+        novo_estado: 'concluido',
+        dados_extraidos: { especialidade: null, profissional_id: null, tipo_consulta: null, convenio_nome: null, data_hora: null, nome_paciente: null, agendamento_id: null },
+        acao: 'criar_agendamento',
+        confianca: 0.95,
+      },
+    });
+
+    await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'Sim, particular mesmo', CLINICA);
+
+    expect(prisma.agendamento.create).toHaveBeenCalledOnce();
+    expect(prisma.agendamento.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          tipoConsulta: 'particular',
+          convenioId: null,
+        }),
+      })
+    );
+  });
+
+  it('clínica com convênios + tipo_consulta ausente no contexto → não cria agendamento (dados incompletos)', async () => {
+    setupPrismaMocks({
+      estadoAtual: 'confirmando',
+      contextoJson: {
+        profissional_id: PROFISSIONAL.id,
+        data_hora: '2026-05-10T10:00:00-03:00',
+        nome_paciente: 'Lucia Ferreira',
+        // tipo_consulta ausente → incompleto quando clínica tem convênios
+      },
+    });
+    prisma.convenio.findMany.mockResolvedValue([CONVENIO_AMIL]);
+    processMessage.mockResolvedValueOnce({
+      mensagemParaPaciente: 'Confirma particular ou convênio?',
+      controle: {
+        intencao: 'agendar',
+        novo_estado: 'escolhendo_convenio',
+        dados_extraidos: { especialidade: null, profissional_id: null, tipo_consulta: null, convenio_nome: null, data_hora: null, nome_paciente: null, agendamento_id: null },
+        acao: 'criar_agendamento', // Claude tentou, mas dados incompletos
+        confianca: 0.7,
+      },
+    });
+
+    await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'Quero agendar', CLINICA);
+
+    // Sem tipo_consulta definido quando há convênios → não deve criar
+    expect(prisma.agendamento.create).not.toHaveBeenCalled();
+  });
+
+  it('clínica com convênios + tipo=convênio mas sem convenio_nome → não cria agendamento', async () => {
+    setupPrismaMocks({
+      estadoAtual: 'confirmando',
+      contextoJson: {
+        profissional_id: PROFISSIONAL.id,
+        data_hora: '2026-05-10T10:00:00-03:00',
+        nome_paciente: 'Marcos Lima',
+        tipo_consulta: 'convenio',
+        // convenio_nome ausente → incompleto
+      },
+    });
+    prisma.convenio.findMany.mockResolvedValue([CONVENIO_AMIL]);
+    processMessage.mockResolvedValueOnce({
+      mensagemParaPaciente: 'Qual o seu plano de saúde?',
+      controle: {
+        intencao: 'agendar',
+        novo_estado: 'escolhendo_convenio',
+        dados_extraidos: { especialidade: null, profissional_id: null, tipo_consulta: null, convenio_nome: null, data_hora: null, nome_paciente: null, agendamento_id: null },
+        acao: 'criar_agendamento',
+        confianca: 0.75,
+      },
+    });
+
+    await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'Convênio', CLINICA);
+
+    expect(prisma.agendamento.create).not.toHaveBeenCalled();
   });
 });

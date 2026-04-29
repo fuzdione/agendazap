@@ -96,8 +96,11 @@ describe('claudeService — processMessage: parsing do JSON de controle', () => 
     expect(controle.dados_extraidos).toEqual({
       especialidade: null,
       profissional_id: null,
+      tipo_consulta: null,
+      convenio_nome: null,
       data_hora: null,
       nome_paciente: null,
+      agendamento_id: null,
     });
   });
 
@@ -232,5 +235,53 @@ describe('claudeService — buildSystemPrompt', () => {
   it('lista "(nenhum profissional cadastrado)" quando lista está vazia', () => {
     const prompt = buildSystemPrompt(clinica, [], [], estadoConversa);
     expect(prompt).toContain('nenhum profissional cadastrado');
+  });
+
+  it('quando clínica NÃO tem convênios → não pergunta sobre tipo de consulta e não lista convênios', () => {
+    const prompt = buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoConversa, [], [], []);
+    expect(prompt).not.toContain('Particular ou Convênio');
+    expect(prompt).toContain('atendimento apenas particular');
+  });
+
+  it('quando clínica TEM convênios → inclui seção de pergunta sobre tipo de consulta', () => {
+    const convenios = [
+      { id: 'conv-001', nome: 'Amil', ativo: true },
+      { id: 'conv-002', nome: 'Unimed', ativo: true },
+    ];
+    const prompt = buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoConversa, [], [], convenios);
+    expect(prompt).toContain('PERGUNTA SOBRE CONVÊNIO');
+    expect(prompt).toContain('Amil');
+    expect(prompt).toContain('Unimed');
+  });
+
+  it('quando clínica TEM convênios → fluxo esperado inclui escolhendo_convenio', () => {
+    const convenios = [{ id: 'conv-001', nome: 'Amil', ativo: true }];
+    const prompt = buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoConversa, [], [], convenios);
+    // A linha do FLUXO ESPERADO deve conter o estado escolhendo_convenio
+    expect(prompt).toContain('→ escolhendo_convenio →');
+  });
+
+  it('quando clínica NÃO tem convênios → NÃO inclui seção PERGUNTA SOBRE CONVÊNIO', () => {
+    const prompt = buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoConversa, [], [], []);
+    // Sem convênios, a seção de pergunta não deve aparecer
+    expect(prompt).not.toContain('PERGUNTA SOBRE CONVÊNIO');
+  });
+
+  it('profissional com convênios → exibe convênios na lista de profissionais', () => {
+    const profComConvenio = [
+      { ...profissionais[0], atendeParticular: true, convenios: [{ nome: 'Amil' }] },
+      { ...profissionais[1], atendeParticular: false, convenios: [] },
+    ];
+    const convenios = [{ id: 'conv-001', nome: 'Amil', ativo: true }];
+    const prompt = buildSystemPrompt(clinica, profComConvenio, horariosDisponiveis, estadoConversa, [], [], convenios);
+    expect(prompt).toContain('convênios: Amil');
+    expect(prompt).toContain('atende: particular');
+  });
+
+  it('confirmação do agendamento menciona tipo: particular ou convênio no prompt', () => {
+    const convenios = [{ id: 'conv-001', nome: 'Amil', ativo: true }];
+    const prompt = buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoConversa, [], [], convenios);
+    expect(prompt).toContain('Convênio: Amil');
+    expect(prompt).toContain('Particular');
   });
 });
