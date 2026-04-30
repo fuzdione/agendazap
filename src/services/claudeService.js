@@ -62,8 +62,14 @@ export function buildSystemPrompt(clinica, profissionais, horariosDisponiveis, e
     conveniosPorProfissional[p.id] = conveniosDoProf;
   }
 
-  // Convênios ativos da clínica (lista global)
-  const conveniosAtivos = conveniosClinica.filter((c) => c.ativo);
+  // Convênios ativos da clínica que têm ao menos um profissional vinculado.
+  // Filtrar aqui evita listar para o paciente um plano que nenhum médico aceita.
+  const conveniosComProfissional = new Set(
+    profissionais.flatMap((p) => (p.convenios ?? []).map((c) => c.id))
+  );
+  const conveniosAtivos = conveniosClinica.filter(
+    (c) => c.ativo && conveniosComProfissional.has(c.id)
+  );
   const temConvenios = conveniosAtivos.length > 0;
 
   // Formata a lista de profissionais e especialidades — UUID incluído para extração correta pelo modelo
@@ -191,12 +197,18 @@ Como posso ajudá-lo(a) hoje?
 3️⃣ Cancelar uma consulta
 
 Caso 2 — Mensagem com intenção clara de agendar (ex: "quero marcar", "preciso de consulta", "quero agendar"):
-Saudação breve + exiba a lista de profissionais imediatamente, usando emoji numbers (1️⃣ 2️⃣ 3️⃣). Exemplo:
+${temConvenios
+  ? `Saudação breve + pergunte IMEDIATAMENTE se é particular ou convênio. NÃO exiba a lista de profissionais ainda. Use EXATAMENTE:
+"Olá! 😊 A consulta será pelo plano ou particular?
+1️⃣ Particular
+2️⃣ Convênio"
+novo_estado = "escolhendo_convenio"`
+  : `Saudação breve + exiba a lista de profissionais imediatamente, usando emoji numbers (1️⃣ 2️⃣ 3️⃣). Exemplo:
 "Olá! 😊 Temos os seguintes profissionais disponíveis — digite o número para escolher:
 
 1️⃣ Dr. João Silva — Clínico Geral (30 min)
 2️⃣ Dra. Maria Santos — Dermatologia (40 min)
-3️⃣ Dra. Ana Costa — Nutrição (50 min)"
+3️⃣ Dra. Ana Costa — Nutrição (50 min)"`}
 
 Formato correto para numeração: 1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣ (e não 1. 2. 3. com ponto).
 
@@ -204,30 +216,45 @@ Formato correto para numeração: 1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣ (e nã
 Quando o paciente responder com um número simples (ex: "1", "2", "3") ou emoji number (ex: "1️⃣", "2️⃣"):
 - Se o estado for "inicio" e o menu exibido foi o de opções (agendar/remarcar/cancelar): 1=agendar, 2=remarcar, 3=cancelar.
 - Se o estado for "escolhendo_especialidade" e a lista exibida foi a de profissionais: resolva para o profissional correspondente na lista da seção PROFISSIONAIS E ESPECIALIDADES, extraia o profissional_id correto e TRANSCREVA OBRIGATORIAMENTE na mesma mensagem as linhas de horários disponíveis desse profissional que constam na seção HORÁRIOS DISPONÍVEIS acima — os horários NÃO são visíveis ao paciente, você DEVE copiá-los explicitamente para o texto da resposta. Nunca responda apenas com o nome do profissional escolhido. Nunca diga "vou verificar", "aguarde" ou "aqui estão os horários" sem realmente listá-los na mesma mensagem.
+${temConvenios ? '- Se o estado for "escolhendo_convenio" e a lista exibida foi de convênios: resolva o convênio pelo número ou nome informado e prossiga conforme seção FLUXO DE CONVÊNIO abaixo.' : ''}
 - Quando há uma lista numerada ativa no contexto, interprete sempre números simples como seleção dessa lista.
 
 ## FLUXO ESPERADO
 ${temConvenios
-  ? 'inicio → escolhendo_especialidade → escolhendo_convenio → escolhendo_horario → confirmando → concluido → volta para inicio'
+  ? 'inicio → escolhendo_convenio → escolhendo_especialidade → escolhendo_horario → confirmando → concluido → volta para inicio'
   : 'inicio → escolhendo_especialidade → escolhendo_horario → confirmando → concluido → volta para inicio'}
 
-${temConvenios ? `## PERGUNTA SOBRE CONVÊNIO (obrigatória antes de mostrar horários)
-Após o paciente escolher o profissional, pergunte ANTES de exibir horários:
+${temConvenios ? `## FLUXO DE CONVÊNIO (obrigatório quando a clínica tem convênios)
+
+### Passo 1 — Logo após o paciente indicar que quer AGENDAR
+Pergunte o tipo de atendimento ANTES de mostrar qualquer profissional:
 "A consulta será pelo plano ou particular? 😊
 1️⃣ Particular
 2️⃣ Convênio"
+novo_estado = "escolhendo_convenio"
 
-Se o paciente responder "Convênio" (ou "2"):
-- Pergunte qual convênio: "Qual o seu plano de saúde?"
-- Liste os convênios aceitos pela clínica (seção CONVÊNIOS ACEITOS acima)
-- Se o convênio informado for aceito E o profissional escolhido atender aquele convênio → prossiga para horários com tipo_consulta = "convenio" e convenio_nome = nome do convênio
-- Se o convênio NÃO for aceito → informe: "Infelizmente não trabalhamos com este plano. Os planos aceitos são: [lista]. Deseja agendar como particular?" e aguarde resposta
-- Se o convênio for aceito mas o profissional não atender aquele convênio → informe: "O [profissional] não atende [convênio], mas você pode agendar como particular ou escolher outro profissional"
+### Passo 2a — Se o paciente responder "Particular" (ou "1")
+- tipo_consulta = "particular"
+- Exiba IMEDIATAMENTE a lista dos profissionais que atendem particular (campo "atende: particular" na seção PROFISSIONAIS E ESPECIALIDADES), com emoji numbers 1️⃣ 2️⃣ 3️⃣
+- novo_estado = "escolhendo_especialidade"
 
-Se o paciente responder "Particular" (ou "1"):
-- tipo_consulta = "particular", prossiga direto para horários
+### Passo 2b — Se o paciente responder "Convênio" (ou "2")
+- Responda em UMA ÚNICA mensagem com a pergunta + lista numerada dos planos aceitos:
+  "Qual o seu plano de saúde? 😊
+  1️⃣ [convênio 1]
+  2️⃣ [convênio 2]
+  ..."
+  Use os nomes exatos da seção CONVÊNIOS ACEITOS. NUNCA faça a pergunta sem a lista.
+- novo_estado = "escolhendo_convenio"
 
-Estado durante escolha do tipo/convênio: "escolhendo_convenio"` : ''}
+### Passo 3 — Quando o paciente informar o plano (por nome ou número)
+- Se convênio ACEITO: exiba a lista dos profissionais que atendem aquele convênio (campo "convênios: ..." na seção PROFISSIONAIS E ESPECIALIDADES), tipo_consulta = "convenio", convenio_nome = nome do convênio, novo_estado = "escolhendo_especialidade"
+- Se convênio NÃO aceito: informe "Infelizmente não trabalhamos com este plano. Os planos aceitos são: [lista]. Deseja agendar como particular?" e aguarde resposta
+
+### Passo 4 — Após o paciente escolher o profissional (estado "escolhendo_especialidade")
+- O tipo de consulta já foi definido — NÃO pergunte sobre convênio novamente
+- TRANSCREVA na mesma mensagem os horários disponíveis desse profissional (seção HORÁRIOS DISPONÍVEIS)
+- novo_estado = "escolhendo_horario"` : ''}
 
 ## CONFIRMAÇÃO DO AGENDAMENTO
 Ao exibir o resumo de confirmação, inclua sempre o tipo de atendimento. Exemplos:
