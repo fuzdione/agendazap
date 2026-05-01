@@ -9,6 +9,105 @@ const MAX_HISTORY = 10;
 // Janela de busca de slots: próximos 7 dias corridos
 const JANELA_SLOTS_DIAS = 7;
 
+// Emojis numerados para listas exibidas ao paciente (1️⃣ … 9️⃣)
+const EMOJI_NUMS = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣'];
+
+/** Normaliza string: minúsculas, sem acentos, trimmed. */
+function normalizar(s) {
+  if (typeof s !== 'string') return '';
+  return s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim();
+}
+
+/**
+ * Resolve a resposta do paciente à pergunta "Particular ou Convênio?".
+ * Aceita números, emoji numbers e variantes textuais comuns.
+ * @returns {'particular'|'convenio'|null}
+ */
+function parseEscolhaTipoConsulta(msg) {
+  const trimmed = String(msg ?? '').trim();
+  if (trimmed === '1' || trimmed === '1️⃣') return 'particular';
+  if (trimmed === '2' || trimmed === '2️⃣') return 'convenio';
+  const n = normalizar(msg);
+  if (n === 'particular' || n === 'part' || n === 'particular.') return 'particular';
+  if (n === 'convenio' || n === 'plano' || n === 'pelo plano' || n === 'pelo convenio' || n === 'convenio.') return 'convenio';
+  return null;
+}
+
+/**
+ * Tenta resolver a mensagem do paciente para um plano de saúde da lista oficial.
+ * Estratégia: número/emoji number → match exato → match parcial (substring).
+ * @returns {object|null} - convênio encontrado ou null
+ */
+function matchPlano(msg, conveniosAtivos) {
+  const trimmed = String(msg ?? '').trim();
+  if (!trimmed || conveniosAtivos.length === 0) return null;
+
+  // Número simples ou emoji number
+  for (let i = 0; i < conveniosAtivos.length; i++) {
+    if (trimmed === String(i + 1) || trimmed === EMOJI_NUMS[i]) {
+      return conveniosAtivos[i];
+    }
+  }
+
+  const n = normalizar(msg);
+  if (!n) return null;
+
+  // Match exato
+  for (const c of conveniosAtivos) {
+    if (normalizar(c.nome) === n) return c;
+  }
+
+  // Match parcial: nome do plano contém a mensagem OU mensagem contém nome do plano
+  // Mínimo de 3 caracteres para evitar false positives ("a" matchando "Caixa")
+  if (n.length < 3) return null;
+  for (const c of conveniosAtivos) {
+    const cn = normalizar(c.nome);
+    if (cn.includes(n) || n.includes(cn)) return c;
+  }
+  return null;
+}
+
+/** Lista numerada de profissionais para o paciente (sem UUID). */
+function formatarListaProfissionaisVisivel(profissionais) {
+  return profissionais
+    .map((p, i) => `${EMOJI_NUMS[i] ?? `${i + 1}.`} ${p.nome} — ${p.especialidade} (${p.duracaoConsultaMin} min)`)
+    .join('\n');
+}
+
+/** Lista numerada de planos de saúde para o paciente. */
+function formatarListaPlanos(conveniosAtivos) {
+  return conveniosAtivos
+    .map((c, i) => `${EMOJI_NUMS[i] ?? `${i + 1}.`} ${c.nome}`)
+    .join('\n');
+}
+
+/**
+ * Aplica a transição determinística para o estado escolhendo_especialidade
+ * após o paciente escolher tipo de consulta (particular ou convênio).
+ * Atualiza o estado no banco e retorna a mensagem com a lista filtrada de profissionais.
+ */
+async function transicionarParaEspecialidade(clinicaId, telefone, contextoAtual, profissionaisFiltrados, tipoConsulta, convenioNome) {
+  const novoContexto = {
+    ...contextoAtual,
+    tipo_consulta: tipoConsulta,
+    convenio_nome: tipoConsulta === 'convenio' ? convenioNome : null,
+  };
+
+  await prisma.estadoConversa.update({
+    where: { telefone_clinicaId: { telefone, clinicaId } },
+    data: { estado: 'escolhendo_especialidade', contextoJson: novoContexto },
+  });
+
+  if (profissionaisFiltrados.length === 0) {
+    return tipoConsulta === 'convenio'
+      ? `Infelizmente, no momento, nenhum profissional atende ${convenioNome}. Deseja agendar como particular? 🙏`
+      : 'No momento não temos profissionais disponíveis para atendimento particular. Por favor, entre em contato com a recepção.';
+  }
+
+  const tituloTipo = tipoConsulta === 'convenio' ? `Convênio ${convenioNome}` : 'Particular';
+  return `Ótimo! ${tituloTipo}. Temos os seguintes profissionais disponíveis — digite o número para escolher: 😊\n\n${formatarListaProfissionaisVisivel(profissionaisFiltrados)}`;
+}
+
 /**
  * Busca os horários disponíveis para todos os profissionais ativos de uma clínica
  * consultando o Google Calendar de cada um.
@@ -395,6 +494,62 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
     orderBy: { nome: 'asc' },
   });
   const temConveniosNaClinica = conveniosClinica.length > 0;
+
+  // 4b. Convênios com pelo menos um profissional vinculado — só estes são oferecidos ao paciente.
+  const conveniosAtivosComProf = conveniosClinica.filter((c) =>
+    profissionais.some((p) => (p.convenios ?? []).some((cv) => cv.id === c.id))
+  );
+
+  // 4c. Interceptação determinística do fluxo de convênio.
+  // Para os estados escolhendo_convenio (tipo de consulta) e escolhendo_plano (qual plano),
+  // resolvemos a entrada em código — sem chamar o LLM. Isso elimina três classes de bug
+  // (resolução numérica, match parcial, filtragem de profissionais por convênio) e
+  // encolhe o prompt em ~700 tokens. Casos não cobertos caem no LLM normalmente.
+  if (estadoConversa.estado === 'escolhendo_convenio' && conveniosAtivosComProf.length > 0) {
+    const escolha = parseEscolhaTipoConsulta(mensagemTexto);
+    if (escolha === 'particular') {
+      const profsParticular = profissionais.filter((p) => p.atendeParticular !== false);
+      return await transicionarParaEspecialidade(
+        clinicaId, telefone, estadoConversa.contextoJson ?? {}, profsParticular, 'particular', null
+      );
+    }
+    if (escolha === 'convenio') {
+      const novoContexto = { ...(estadoConversa.contextoJson ?? {}) };
+      await prisma.estadoConversa.update({
+        where: { telefone_clinicaId: { telefone, clinicaId } },
+        data: { estado: 'escolhendo_plano', contextoJson: novoContexto },
+      });
+      return `Qual o seu plano de saúde? 😊\n${formatarListaPlanos(conveniosAtivosComProf)}`;
+    }
+    // Sem match → cai no LLM (entrada livre como "ainda não sei", etc.)
+  }
+
+  if (estadoConversa.estado === 'escolhendo_plano' && conveniosAtivosComProf.length > 0) {
+    // Tenta resolver para um plano PRIMEIRO — números (1, 2, …) e emoji numbers se referem
+    // à lista de planos exibida; tratá-los como "particular" estaria errado neste estado.
+    const planoMatch = matchPlano(mensagemTexto, conveniosAtivosComProf);
+    if (planoMatch) {
+      const profsDoPlano = profissionais.filter((p) =>
+        (p.convenios ?? []).some((c) => c.id === planoMatch.id)
+      );
+      return await transicionarParaEspecialidade(
+        clinicaId, telefone, estadoConversa.contextoJson ?? {}, profsDoPlano, 'convenio', planoMatch.nome
+      );
+    }
+
+    // Permite mudar de ideia: paciente digita a PALAVRA "particular" / "part".
+    // Só aceita texto (não número) — números já foram considerados acima como índice de plano.
+    const normalizada = normalizar(mensagemTexto);
+    if (normalizada === 'particular' || normalizada === 'part' || normalizada === 'particular.') {
+      const profsParticular = profissionais.filter((p) => p.atendeParticular !== false);
+      return await transicionarParaEspecialidade(
+        clinicaId, telefone, estadoConversa.contextoJson ?? {}, profsParticular, 'particular', null
+      );
+    }
+
+    // Não bateu — re-pergunta com a lista, sem cair no LLM (texto fixo)
+    return `Não entendi. Qual destes planos você possui? 😊\n${formatarListaPlanos(conveniosAtivosComProf)}`;
+  }
 
   // 5. Obtém horários disponíveis via Google Calendar (com fallback para mock)
   const horariosDisponiveis = await getAvailableSlots(clinicaId, profissionais);

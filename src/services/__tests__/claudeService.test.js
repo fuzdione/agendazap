@@ -243,22 +243,33 @@ describe('claudeService — buildSystemPrompt', () => {
     expect(prompt).toContain('atendimento apenas particular');
   });
 
-  it('quando clínica TEM convênios → inclui seção de pergunta sobre tipo de consulta', () => {
+  it('quando clínica TEM convênios → instrui o LLM a perguntar Particular ou Convênio (Caso 2) e lista os planos aceitos', () => {
     const convenios = [
       { id: 'conv-001', nome: 'Amil', ativo: true },
       { id: 'conv-002', nome: 'Unimed', ativo: true },
     ];
-    const prompt = buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoConversa, [], [], convenios);
-    expect(prompt).toContain('PERGUNTA SOBRE CONVÊNIO');
+    const profsComConv = [
+      { ...profissionais[0], atendeParticular: true, convenios: [{ id: 'conv-001', nome: 'Amil' }] },
+      { ...profissionais[1], atendeParticular: true, convenios: [{ id: 'conv-002', nome: 'Unimed' }] },
+    ];
+    const prompt = buildSystemPrompt(clinica, profsComConv, horariosDisponiveis, estadoConversa, [], [], convenios);
+    // Caso 2 (paciente quer agendar): LLM deve perguntar particular ou convênio
+    expect(prompt).toContain('particular ou convênio');
+    // Convênios aceitos listados na seção de informação ao paciente
     expect(prompt).toContain('Amil');
     expect(prompt).toContain('Unimed');
   });
 
-  it('quando clínica TEM convênios → fluxo esperado inclui escolhendo_convenio', () => {
+  it('quando clínica TEM convênios → fluxo esperado e enum de novo_estado mencionam escolhendo_convenio', () => {
     const convenios = [{ id: 'conv-001', nome: 'Amil', ativo: true }];
-    const prompt = buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoConversa, [], [], convenios);
-    // A linha do FLUXO ESPERADO deve conter o estado escolhendo_convenio
-    expect(prompt).toContain('→ escolhendo_convenio →');
+    const profsComConv = [
+      { ...profissionais[0], atendeParticular: true, convenios: [{ id: 'conv-001', nome: 'Amil' }] },
+      profissionais[1],
+    ];
+    const prompt = buildSystemPrompt(clinica, profsComConv, horariosDisponiveis, estadoConversa, [], [], convenios);
+    // O estado escolhendo_convenio aparece no FLUXO ESPERADO e no enum do JSON de controle
+    expect(prompt).toContain('escolhendo_convenio');
+    expect(prompt).toContain('escolhendo_plano');
   });
 
   it('quando clínica NÃO tem convênios → NÃO inclui seção PERGUNTA SOBRE CONVÊNIO', () => {

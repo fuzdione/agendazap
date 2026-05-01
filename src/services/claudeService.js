@@ -72,8 +72,29 @@ export function buildSystemPrompt(clinica, profissionais, horariosDisponiveis, e
   );
   const temConvenios = conveniosAtivos.length > 0;
 
-  // Formata a lista de profissionais e especialidades — UUID incluído para extração correta pelo modelo
-  const listaProfissionais = profissionais
+  // Filtra a lista de profissionais visíveis ao modelo conforme o contexto da conversa.
+  // Quando o código já resolveu tipo_consulta/convenio_nome (interceptação determinística
+  // em conversationService.js), o LLM só deve enxergar os profissionais que o paciente
+  // pode escolher — assim "1" e "2" mapeiam corretamente para os médicos exibidos.
+  const contextoTipo = estadoConversa?.contextoJson?.tipo_consulta;
+  const contextoConvenioNome = estadoConversa?.contextoJson?.convenio_nome;
+
+  let profissionaisVisiveis = profissionais;
+  if (contextoTipo === 'particular') {
+    profissionaisVisiveis = profissionais.filter((p) => p.atendeParticular !== false);
+  } else if (contextoTipo === 'convenio' && contextoConvenioNome) {
+    const convenioMatch = conveniosClinica.find(
+      (c) => c.nome.toLowerCase() === contextoConvenioNome.toLowerCase()
+    );
+    if (convenioMatch) {
+      profissionaisVisiveis = profissionais.filter((p) =>
+        (p.convenios ?? []).some((cv) => cv.id === convenioMatch.id)
+      );
+    }
+  }
+
+  // Lista de profissionais — UUID incluído para extração correta pelo modelo.
+  const listaProfissionais = profissionaisVisiveis
     .map((p, i) => {
       const conv = conveniosPorProfissional[p.id] ?? [];
       const infoConvenio = conv.length > 0 ? ` | convênios: ${conv.join(', ')}` : '';
@@ -87,7 +108,12 @@ export function buildSystemPrompt(clinica, profissionais, horariosDisponiveis, e
   const MAX_DIAS = 3;
   const MAX_SLOTS_POR_DIA = 8;
 
-  const listaHorarios = horariosDisponiveis
+  // Horários só dos profissionais visíveis (alinhado com o filtro acima).
+  const horariosVisiveis = horariosDisponiveis.filter((h) =>
+    profissionaisVisiveis.some((p) => p.id === h.profissional.id)
+  );
+
+  const listaHorarios = horariosVisiveis
     .map(({ profissional, slots }) => {
       if (!slots || slots.length === 0) return `  ${profissional.nome}: sem horários disponíveis`;
 
@@ -216,45 +242,14 @@ Formato correto para numeração: 1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣ (e nã
 Quando o paciente responder com um número simples (ex: "1", "2", "3") ou emoji number (ex: "1️⃣", "2️⃣"):
 - Se o estado for "inicio" e o menu exibido foi o de opções (agendar/remarcar/cancelar): 1=agendar, 2=remarcar, 3=cancelar.
 - Se o estado for "escolhendo_especialidade" e a lista exibida foi a de profissionais: resolva para o profissional correspondente na lista da seção PROFISSIONAIS E ESPECIALIDADES, extraia o profissional_id correto e TRANSCREVA OBRIGATORIAMENTE na mesma mensagem as linhas de horários disponíveis desse profissional que constam na seção HORÁRIOS DISPONÍVEIS acima — os horários NÃO são visíveis ao paciente, você DEVE copiá-los explicitamente para o texto da resposta. Nunca responda apenas com o nome do profissional escolhido. Nunca diga "vou verificar", "aguarde" ou "aqui estão os horários" sem realmente listá-los na mesma mensagem.
-${temConvenios ? '- Se o estado for "escolhendo_convenio" e a lista exibida foi de convênios: resolva o convênio pelo número ou nome informado e prossiga conforme seção FLUXO DE CONVÊNIO abaixo.' : ''}
 - Quando há uma lista numerada ativa no contexto, interprete sempre números simples como seleção dessa lista.
+${temConvenios ? `
+NOTA: os estados "escolhendo_convenio" (Particular vs Convênio) e "escolhendo_plano" (qual plano de saúde) são tratados deterministicamente pelo backend — você não receberá mensagens nesses estados. Sua função aqui é apenas, no estado "inicio" com intenção clara de agendar (Caso 2 abaixo), perguntar Particular ou Convênio.` : ''}
 
 ## FLUXO ESPERADO
 ${temConvenios
-  ? 'inicio → escolhendo_convenio → escolhendo_especialidade → escolhendo_horario → confirmando → concluido → volta para inicio'
+  ? 'inicio → escolhendo_convenio (backend) → escolhendo_plano (backend, se Convênio) → escolhendo_especialidade → escolhendo_horario → confirmando → concluido → volta para inicio'
   : 'inicio → escolhendo_especialidade → escolhendo_horario → confirmando → concluido → volta para inicio'}
-
-${temConvenios ? `## FLUXO DE CONVÊNIO (obrigatório quando a clínica tem convênios)
-
-### Passo 1 — Logo após o paciente indicar que quer AGENDAR
-Pergunte o tipo de atendimento ANTES de mostrar qualquer profissional:
-"A consulta será pelo plano ou particular? 😊
-1️⃣ Particular
-2️⃣ Convênio"
-novo_estado = "escolhendo_convenio"
-
-### Passo 2a — Se o paciente responder "Particular" (ou "1")
-- tipo_consulta = "particular"
-- Exiba IMEDIATAMENTE a lista dos profissionais que atendem particular (campo "atende: particular" na seção PROFISSIONAIS E ESPECIALIDADES), com emoji numbers 1️⃣ 2️⃣ 3️⃣
-- novo_estado = "escolhendo_especialidade"
-
-### Passo 2b — Se o paciente responder "Convênio" (ou "2")
-- Responda em UMA ÚNICA mensagem com a pergunta + lista numerada dos planos aceitos:
-  "Qual o seu plano de saúde? 😊
-  1️⃣ [convênio 1]
-  2️⃣ [convênio 2]
-  ..."
-  Use os nomes exatos da seção CONVÊNIOS ACEITOS. NUNCA faça a pergunta sem a lista.
-- novo_estado = "escolhendo_convenio"
-
-### Passo 3 — Quando o paciente informar o plano (por nome ou número)
-- Se convênio ACEITO: exiba a lista dos profissionais que atendem aquele convênio (campo "convênios: ..." na seção PROFISSIONAIS E ESPECIALIDADES), tipo_consulta = "convenio", convenio_nome = nome do convênio, novo_estado = "escolhendo_especialidade"
-- Se convênio NÃO aceito: informe "Infelizmente não trabalhamos com este plano. Os planos aceitos são: [lista]. Deseja agendar como particular?" e aguarde resposta
-
-### Passo 4 — Após o paciente escolher o profissional (estado "escolhendo_especialidade")
-- O tipo de consulta já foi definido — NÃO pergunte sobre convênio novamente
-- TRANSCREVA na mesma mensagem os horários disponíveis desse profissional (seção HORÁRIOS DISPONÍVEIS)
-- novo_estado = "escolhendo_horario"` : ''}
 
 ## CONFIRMAÇÃO DO AGENDAMENTO
 Ao exibir o resumo de confirmação, inclua sempre o tipo de atendimento. Exemplos:
@@ -269,7 +264,7 @@ O JSON deve seguir exatamente este formato:
 <json>
 {
   "intencao": "agendar|remarcar|cancelar|duvida|saudacao|outro",
-  "novo_estado": "inicio|escolhendo_especialidade|escolhendo_convenio|escolhendo_horario|confirmando|concluido",
+  "novo_estado": "inicio|escolhendo_convenio|escolhendo_plano|escolhendo_especialidade|escolhendo_horario|confirmando|concluido",
   "dados_extraidos": {
     "especialidade": "string ou null",
     "profissional_id": "UUID do profissional ou null",

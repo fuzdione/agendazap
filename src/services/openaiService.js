@@ -14,25 +14,39 @@ export { buildSystemPrompt } from './claudeService.js';
  * Substitui a seção de instrução de formato do system prompt pela versão JSON mode.
  * O OpenAI JSON mode exige que a resposta inteira seja um objeto JSON válido, então
  * pedimos {"mensagem_paciente": "...", "controle": {...}} em vez de tags <json>.
+ *
+ * IMPORTANTE: este bloco tem que se manter sincronizado com o `## BLOCO JSON DE CONTROLE`
+ * de claudeService.js — mesmos estados e mesmos campos em dados_extraidos. Se divergir,
+ * o GPT-4o-mini segue este bloco (último do prompt) e perde campos como tipo_consulta /
+ * convenio_nome, quebrando o fluxo de convênio.
  */
 function adaptSystemPromptForJsonMode(systemPrompt) {
-  const idx = systemPrompt.indexOf('## INSTRUÇÃO OBRIGATÓRIA');
+  // Aceita os dois marcadores históricos para garantir que o bloco antigo seja removido
+  // em vez de duplicado (a presença de dois blocos de formato confunde o modelo).
+  const marcadores = ['## BLOCO JSON DE CONTROLE', '## INSTRUÇÃO OBRIGATÓRIA'];
+  let idx = -1;
+  for (const m of marcadores) {
+    const i = systemPrompt.indexOf(m);
+    if (i >= 0 && (idx === -1 || i < idx)) idx = i;
+  }
   const base = idx >= 0 ? systemPrompt.substring(0, idx) : systemPrompt;
 
   return base + `## INSTRUÇÃO OBRIGATÓRIA — FORMATO DE RESPOSTA
 Responda SEMPRE com um objeto JSON com exatamente duas chaves:
-- "mensagem_paciente": string com a mensagem que será enviada ao paciente
+- "mensagem_paciente": string NÃO-VAZIA com a mensagem que será enviada ao paciente (esta chave é obrigatória em toda resposta)
 - "controle": objeto de controle interno
 
-Formato obrigatório (não inclua nada fora deste JSON):
+Formato obrigatório (não inclua nada fora deste JSON, e nunca use tags <json>):
 {
   "mensagem_paciente": "sua mensagem para o paciente aqui",
   "controle": {
     "intencao": "agendar|remarcar|cancelar|duvida|saudacao|outro",
-    "novo_estado": "inicio|escolhendo_especialidade|escolhendo_horario|confirmando|concluido",
+    "novo_estado": "inicio|escolhendo_convenio|escolhendo_plano|escolhendo_especialidade|escolhendo_horario|confirmando|concluido",
     "dados_extraidos": {
       "especialidade": "string ou null",
       "profissional_id": "UUID do profissional ou null",
+      "tipo_consulta": "particular|convenio ou null",
+      "convenio_nome": "nome do convênio (ex: Amil) ou null",
       "data_hora": "ISO string (ex: 2026-03-30T09:00:00-03:00) ou null",
       "nome_paciente": "string ou null",
       "agendamento_id": "UUID do agendamento a remarcar/cancelar ou null"
@@ -49,7 +63,9 @@ Regras para o controle:
 - CRÍTICO: Assim que identificar intenção de remarcar ou cancelar, preencha "agendamento_id" imediatamente e preserve em todos os turnos seguintes.
 - "confianca" é um número entre 0.0 e 1.0.
 - Preserve os dados já extraídos em turnos anteriores (disponíveis no contexto acumulado acima).
-- Se o paciente escolher por número ou abreviação, resolva para o nome/id correto.`;
+- Se o paciente escolher por número ou abreviação, resolva para o nome/id correto.
+- Quando a clínica tem convênios, respeite as seções "PERGUNTA SOBRE CONVÊNIO E FLUXO DE ATENDIMENTO" e "PROFISSIONAIS POR TIPO DE ATENDIMENTO" do prompt acima — preencha tipo_consulta e convenio_nome conforme o passo correspondente.
+- "mensagem_paciente" NUNCA pode ser vazia ou ausente. Mesmo em respostas de transição, sempre escreva o texto que o paciente verá.`;
 }
 
 /**
@@ -106,14 +122,26 @@ export async function processMessage(messageText, systemPrompt, recentHistory, e
       parsed = JSON.parse(fullText);
     } catch {
       console.error('[openai] Falha ao parsear JSON mode response:', fullText.slice(0, 300));
-      return { mensagemParaPaciente: controleFallback.mensagemParaPaciente ?? '', controle: controleFallback };
+      // Mensagem amigável em vez do fallback "probleminha técnico" do webhook —
+      // o paciente recebe uma orientação clara para tentar de novo.
+      return {
+        mensagemParaPaciente: 'Desculpe, não consegui interpretar agora. Pode tentar de novo, por favor? 🙏',
+        controle: controleFallback,
+      };
     }
 
-    const mensagemParaPaciente = (parsed.mensagem_paciente ?? '').trim();
+    let mensagemParaPaciente = (parsed.mensagem_paciente ?? '').trim();
     const controle = parsed.controle ?? controleFallback;
 
     if (!controle.dados_extraidos) controle.dados_extraidos = controleFallback.dados_extraidos;
     if (controle.confianca === undefined) controle.confianca = 0.5;
+
+    // Defesa: se o modelo omitir mensagem_paciente, evita que o webhook caia no fallback
+    // "probleminha técnico". Loga para diagnóstico e devolve uma reprompt mínima.
+    if (!mensagemParaPaciente) {
+      console.error('[openai] mensagem_paciente vazio no JSON retornado:', fullText.slice(0, 300));
+      mensagemParaPaciente = 'Desculpe, não entendi. Pode reformular sua mensagem, por favor? 🙏';
+    }
 
     return { mensagemParaPaciente, controle };
 

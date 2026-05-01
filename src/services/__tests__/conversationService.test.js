@@ -797,3 +797,145 @@ describe('conversationService — handleIncomingMessage: particular vs convênio
     expect(prisma.agendamento.create).not.toHaveBeenCalled();
   });
 });
+
+// =====================================================================
+// TESTE 6 — Interceptação determinística do fluxo de convênio
+// =====================================================================
+
+describe('conversationService — interceptação determinística (escolhendo_convenio / escolhendo_plano)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /**
+   * Helper: configura clínica com convênios e profissional vinculado.
+   * Por padrão tem PROFISSIONAL_COM_CONVENIO (vinculado ao Amil) + Unimed sem ninguém.
+   */
+  function setupClinicaComConvenios({ estadoAtual, contextoJson = {} } = {}) {
+    setupPrismaMocks({ estadoAtual, contextoJson });
+    prisma.profissional.findMany.mockResolvedValue([PROFISSIONAL_COM_CONVENIO]);
+    prisma.convenio.findMany.mockResolvedValue([CONVENIO_AMIL, CONVENIO_UNIMED]);
+  }
+
+  it('estado escolhendo_convenio + "1" → transita para escolhendo_especialidade com particular, sem chamar LLM', async () => {
+    setupClinicaComConvenios({ estadoAtual: 'escolhendo_convenio' });
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, '1', CLINICA);
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(resposta).toContain('Particular');
+    expect(resposta).toContain(PROFISSIONAL_COM_CONVENIO.nome);
+    expect(prisma.estadoConversa.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          estado: 'escolhendo_especialidade',
+          contextoJson: expect.objectContaining({ tipo_consulta: 'particular' }),
+        }),
+      })
+    );
+  });
+
+  it('estado escolhendo_convenio + "2" → transita para escolhendo_plano e exibe lista de planos, sem chamar LLM', async () => {
+    setupClinicaComConvenios({ estadoAtual: 'escolhendo_convenio' });
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, '2', CLINICA);
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(resposta).toContain('plano de saúde');
+    expect(resposta).toContain('Amil');
+    // Unimed só aparece se tiver profissional vinculado — neste setup não tem, então não deve aparecer
+    expect(resposta).not.toContain('Unimed');
+    expect(prisma.estadoConversa.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ estado: 'escolhendo_plano' }),
+      })
+    );
+  });
+
+  it('estado escolhendo_plano + número correspondente → resolve plano e transita para escolhendo_especialidade', async () => {
+    setupClinicaComConvenios({ estadoAtual: 'escolhendo_plano' });
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, '1', CLINICA);
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(resposta).toContain('Convênio Amil');
+    expect(resposta).toContain(PROFISSIONAL_COM_CONVENIO.nome);
+    expect(prisma.estadoConversa.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          estado: 'escolhendo_especialidade',
+          contextoJson: expect.objectContaining({ tipo_consulta: 'convenio', convenio_nome: 'Amil' }),
+        }),
+      })
+    );
+  });
+
+  it('estado escolhendo_plano + nome parcial ("Bradesc" → Bradesco Saúde) → resolve corretamente', async () => {
+    const CONVENIO_BRADESCO = { id: 'convenio-uuid-bradesco', clinicaId: CLINICA.id, nome: 'Bradesco Saúde', ativo: true };
+    const PROF_BRADESCO = { ...PROFISSIONAL, convenios: [{ convenioId: CONVENIO_BRADESCO.id, convenio: CONVENIO_BRADESCO }] };
+    setupPrismaMocks({ estadoAtual: 'escolhendo_plano' });
+    prisma.profissional.findMany.mockResolvedValue([PROF_BRADESCO]);
+    prisma.convenio.findMany.mockResolvedValue([CONVENIO_BRADESCO]);
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'Bradesc', CLINICA);
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(resposta).toContain('Bradesco Saúde');
+    expect(prisma.estadoConversa.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          contextoJson: expect.objectContaining({ convenio_nome: 'Bradesco Saúde' }),
+        }),
+      })
+    );
+  });
+
+  it('estado escolhendo_plano + plano inexistente → re-pergunta com lista (texto fixo, sem LLM)', async () => {
+    setupClinicaComConvenios({ estadoAtual: 'escolhendo_plano' });
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'SulAmérica', CLINICA);
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(resposta).toContain('Não entendi');
+    expect(resposta).toContain('Amil');
+    // Estado NÃO muda — paciente continua em escolhendo_plano
+    expect(prisma.estadoConversa.update).not.toHaveBeenCalled();
+  });
+
+  it('estado escolhendo_plano + "particular" → muda para particular (paciente mudou de ideia)', async () => {
+    setupClinicaComConvenios({ estadoAtual: 'escolhendo_plano' });
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'particular', CLINICA);
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(resposta).toContain('Particular');
+    expect(prisma.estadoConversa.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          estado: 'escolhendo_especialidade',
+          contextoJson: expect.objectContaining({ tipo_consulta: 'particular', convenio_nome: null }),
+        }),
+      })
+    );
+  });
+
+  it('estado escolhendo_convenio + texto livre → cai no LLM (não intercepta)', async () => {
+    setupClinicaComConvenios({ estadoAtual: 'escolhendo_convenio' });
+    processMessage.mockResolvedValueOnce(makeControle({ novo_estado: 'escolhendo_convenio' }));
+
+    await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'ainda não sei', CLINICA);
+
+    expect(processMessage).toHaveBeenCalled();
+  });
+
+  it('clínica sem convênios + estado escolhendo_convenio (caso degenerado) → cai no LLM', async () => {
+    setupPrismaMocks({ estadoAtual: 'escolhendo_convenio' });
+    prisma.convenio.findMany.mockResolvedValue([]);
+    processMessage.mockResolvedValueOnce(makeControle({ novo_estado: 'escolhendo_especialidade' }));
+
+    await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, '2', CLINICA);
+
+    // Sem convênios, a interceptação não dispara — LLM responde normalmente
+    expect(processMessage).toHaveBeenCalled();
+  });
+});
