@@ -23,7 +23,12 @@ export async function dashboardRoutes(fastify) {
     // Próximas 2 horas — usado para destacar "vai chegar paciente"
     const proximas2hLimit = new Date(agora.getTime() + 2 * 3600 * 1000);
 
-    // Últimos 30 dias para taxa de confirmação
+    // Janela de "próximos agendamentos" — 7 dias à frente. O frontend filtra
+    // entre Hoje / Amanhã / Próximos 7 dias usando esses dados; uma única query
+    // serve às 3 abas, o que evita refetch ao trocar o filtro.
+    const proximosLimit = new Date(agora.getTime() + 7 * 86400000);
+
+    // Últimos 30 dias para taxa de confirmação e mix particular/convênio
     const inicio30Dias = new Date(agora.getTime() - 30 * 24 * 60 * 60 * 1000);
 
     const [
@@ -50,31 +55,39 @@ export async function dashboardRoutes(fastify) {
         },
       }),
 
-      // Agendamentos da semana corrente — dataHora para agregar por dia no JS
+      // Agendamentos da semana corrente — agregamos no JS por dia (gráfico)
+      // e por profissional (top profissionais).
       prisma.agendamento.findMany({
         where: {
           clinicaId,
           dataHora: { gte: inicioSemana, lt: fimSemana },
           status: { notIn: ['cancelado', 'no_show'] },
         },
-        select: { dataHora: true },
+        select: {
+          dataHora: true,
+          profissional: { select: { id: true, nome: true, especialidade: true } },
+        },
       }),
 
-      // Agendamentos dos últimos 30 dias para taxa de confirmação
+      // Últimos 30 dias — usado para taxa de confirmação E mix particular/convênio
       prisma.agendamento.findMany({
         where: { clinicaId, dataHora: { gte: inicio30Dias } },
-        select: { status: true },
+        select: {
+          status: true,
+          tipoConsulta: true,
+          convenio: { select: { nome: true } },
+        },
       }),
 
-      // Próximos 5 agendamentos a partir de agora
+      // Próximos 7 dias (até 50) — frontend filtra para Hoje/Amanhã/7 dias
       prisma.agendamento.findMany({
         where: {
           clinicaId,
-          dataHora: { gte: agora },
+          dataHora: { gte: agora, lte: proximosLimit },
           status: { in: ['agendado', 'confirmado'] },
         },
         orderBy: { dataHora: 'asc' },
-        take: 5,
+        take: 50,
         include: {
           paciente: { select: { nome: true, telefone: true } },
           profissional: { select: { nome: true, especialidade: true } },
@@ -136,6 +149,50 @@ export async function dashboardRoutes(fastify) {
     ).length;
     const taxaConfirmacao = total30 > 0 ? Math.round((confirmados30 / total30) * 100) : 0;
 
+    // ── Mix particular vs convênio (30 dias, exclui cancelado/no-show) ──
+    const agendamentosValidos30 = agendamentos30Dias.filter(
+      (a) => !['cancelado', 'no_show'].includes(a.status),
+    );
+    const conveniosCount = {};
+    let particularCount = 0;
+    for (const a of agendamentosValidos30) {
+      if (a.tipoConsulta === 'convenio' && a.convenio?.nome) {
+        conveniosCount[a.convenio.nome] = (conveniosCount[a.convenio.nome] ?? 0) + 1;
+      } else {
+        particularCount += 1;
+      }
+    }
+    const conveniosArr = Object.entries(conveniosCount)
+      .map(([nome, count]) => ({ nome, count }))
+      .sort((a, b) => b.count - a.count);
+    const totalMix = particularCount + conveniosArr.reduce((s, c) => s + c.count, 0);
+    const mixConsulta = {
+      total: totalMix,
+      particular: particularCount,
+      convenios: conveniosArr,
+    };
+
+    // ── Top profissionais da semana corrente ──
+    const profPorContagem = new Map();
+    for (const a of agendamentosSemanaRaw) {
+      if (!a.profissional) continue;
+      const id = a.profissional.id;
+      const existing = profPorContagem.get(id);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        profPorContagem.set(id, {
+          id,
+          nome: a.profissional.nome,
+          especialidade: a.profissional.especialidade,
+          count: 1,
+        });
+      }
+    }
+    const topProfissionais = Array.from(profPorContagem.values())
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
     // ── Saúde do bot ──
     const conversasHoje = conversasEntradaHoje.length;
 
@@ -150,9 +207,11 @@ export async function dashboardRoutes(fastify) {
         // Semana
         agendamentosSemana: totalSemana,
         agendamentosPorDia,
+        topProfissionais,
 
         // 30 dias
         taxaConfirmacao,
+        mixConsulta,
 
         // Saúde do bot
         botHoje: {
@@ -160,7 +219,7 @@ export async function dashboardRoutes(fastify) {
           agendamentosCriados: agendamentosCriadosHoje,
         },
 
-        // Lista
+        // Lista (próximos 7 dias — frontend filtra por aba)
         proximosAgendamentos,
       },
     });

@@ -1,8 +1,22 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../services/api.js';
-import { format } from 'date-fns';
+import { format, isToday, isTomorrow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Clock, MessageSquare, CalendarRange, AlertCircle } from 'lucide-react';
+import { Clock, MessageSquare, CalendarRange, AlertCircle, PieChart, Trophy } from 'lucide-react';
+
+// Paleta usada nas barras do mix particular/convênio.
+// Particular fica fixo no azul; convênios pegam as próximas cores em ordem.
+const MIX_PARTICULAR_COLOR = 'bg-blue-500';
+const MIX_CONVENIO_COLORS = [
+  'bg-purple-500',
+  'bg-pink-500',
+  'bg-amber-500',
+  'bg-teal-500',
+  'bg-rose-500',
+  'bg-indigo-500',
+  'bg-lime-500',
+  'bg-cyan-500',
+];
 
 const STATUS_LABEL = {
   agendado:   { label: 'Agendado',   cls: 'bg-yellow-100 text-yellow-700' },
@@ -30,6 +44,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState('');
   const [atualizando, setAtualizando] = useState({});
+  const [filtroPeriodo, setFiltroPeriodo] = useState('hoje'); // 'hoje' | 'amanha' | '7dias'
 
   useEffect(() => {
     carregarDados();
@@ -75,8 +90,28 @@ export default function Dashboard() {
   const naoConfirmados = hoje.agendado;
   const dataDeHoje = format(new Date(), "EEEE, dd 'de' MMMM", { locale: ptBR });
 
-  // Para o gráfico — encontra valor máximo para escala proporcional
+  // Para o gráfico semanal — escala proporcional ao maior dia
   const maxSemana = Math.max(...(dados.agendamentosPorDia ?? []).map((d) => d.count), 1);
+
+  // Mix particular/convênio — só renderiza o card quando há convênios envolvidos
+  const mix = dados.mixConsulta ?? { total: 0, particular: 0, convenios: [] };
+  const temMixDeConvenios = mix.convenios.length > 0;
+
+  // Top profissionais da semana — escala proporcional ao topo
+  const topProfs = dados.topProfissionais ?? [];
+  const maxTopProf = Math.max(...topProfs.map((p) => p.count), 1);
+
+  // Filtro Hoje / Amanhã / Próximos 7 dias — feito client-side no array já carregado
+  const proximosFiltrados = useMemo(() => {
+    const lista = dados.proximosAgendamentos ?? [];
+    if (filtroPeriodo === '7dias') return lista;
+    return lista.filter((ag) => {
+      const dt = new Date(ag.dataHora);
+      if (filtroPeriodo === 'hoje') return isToday(dt);
+      if (filtroPeriodo === 'amanha') return isTomorrow(dt);
+      return true;
+    });
+  }, [dados.proximosAgendamentos, filtroPeriodo]);
 
   return (
     <div className="space-y-5">
@@ -180,16 +215,143 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── Próximos agendamentos com botões inline ── */}
+      {/* ── Linha: Mix de atendimento + Top profissionais ── */}
+      <div className={`grid grid-cols-1 ${temMixDeConvenios ? 'lg:grid-cols-2' : ''} gap-4`}>
+        {/* Mix particular/convênio (oculto se a clínica não tem convênios) */}
+        {temMixDeConvenios && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <PieChart size={16} className="text-gray-400" />
+                <h2 className="font-semibold text-gray-800 text-sm">Mix de atendimento (30d)</h2>
+              </div>
+              <p className="text-xs text-gray-500">
+                <span className="font-semibold text-gray-700">{mix.total}</span> consultas
+              </p>
+            </div>
+
+            {mix.total === 0 ? (
+              <p className="text-sm text-gray-400 py-6 text-center">Sem dados nos últimos 30 dias.</p>
+            ) : (
+              <>
+                {/* Barra horizontal empilhada */}
+                <div className="h-3 rounded-full overflow-hidden flex bg-gray-100 mt-3">
+                  {mix.particular > 0 && (
+                    <div
+                      className={MIX_PARTICULAR_COLOR}
+                      style={{ width: `${(mix.particular / mix.total) * 100}%` }}
+                      title={`Particular: ${mix.particular}`}
+                    />
+                  )}
+                  {mix.convenios.map((c, i) => (
+                    <div
+                      key={c.nome}
+                      className={MIX_CONVENIO_COLORS[i % MIX_CONVENIO_COLORS.length]}
+                      style={{ width: `${(c.count / mix.total) * 100}%` }}
+                      title={`${c.nome}: ${c.count}`}
+                    />
+                  ))}
+                </div>
+
+                {/* Legenda */}
+                <div className="space-y-1.5 mt-4">
+                  {mix.particular > 0 && (
+                    <div className="flex items-center justify-between text-sm">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className={`w-3 h-3 rounded ${MIX_PARTICULAR_COLOR} flex-shrink-0`} />
+                        <span className="text-gray-700 truncate">Particular</span>
+                      </div>
+                      <span className="text-gray-500 flex-shrink-0 ml-2">
+                        {mix.particular} <span className="text-gray-400">({Math.round((mix.particular / mix.total) * 100)}%)</span>
+                      </span>
+                    </div>
+                  )}
+                  {mix.convenios.map((c, i) => (
+                    <div key={c.nome} className="flex items-center justify-between text-sm">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className={`w-3 h-3 rounded ${MIX_CONVENIO_COLORS[i % MIX_CONVENIO_COLORS.length]} flex-shrink-0`} />
+                        <span className="text-gray-700 truncate">{c.nome}</span>
+                      </div>
+                      <span className="text-gray-500 flex-shrink-0 ml-2">
+                        {c.count} <span className="text-gray-400">({Math.round((c.count / mix.total) * 100)}%)</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Top profissionais da semana */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Trophy size={16} className="text-gray-400" />
+              <h2 className="font-semibold text-gray-800 text-sm">Profissionais da semana</h2>
+            </div>
+          </div>
+
+          {topProfs.length === 0 ? (
+            <p className="text-sm text-gray-400 py-6 text-center">Sem agendamentos esta semana.</p>
+          ) : (
+            <div className="space-y-3 mt-3">
+              {topProfs.map((p, i) => {
+                const pct = (p.count / maxTopProf) * 100;
+                return (
+                  <div key={p.id} className="flex items-center gap-3">
+                    <span className="text-xs font-semibold text-gray-400 w-5 flex-shrink-0">#{i + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-800 truncate">{p.nome}</p>
+                      <p className="text-xs text-gray-500 truncate">{p.especialidade}</p>
+                      <div className="bg-gray-100 rounded-full h-1.5 mt-1.5 overflow-hidden">
+                        <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                    <span className="text-sm font-semibold text-gray-700 w-8 text-right flex-shrink-0">{p.count}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Próximos agendamentos com filtro de período + botões inline ── */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100">
-        <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
-          <Clock size={18} className="text-gray-400" />
-          <h2 className="font-semibold text-gray-800">Próximos agendamentos</h2>
+        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-2">
+            <Clock size={18} className="text-gray-400" />
+            <h2 className="font-semibold text-gray-800">Próximos agendamentos</h2>
+          </div>
+
+          {/* Tabs de período */}
+          <div className="flex gap-1 bg-gray-100 p-0.5 rounded-lg text-xs">
+            {[
+              { value: 'hoje',   label: 'Hoje' },
+              { value: 'amanha', label: 'Amanhã' },
+              { value: '7dias',  label: 'Próximos 7 dias' },
+            ].map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setFiltroPeriodo(opt.value)}
+                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
+                  filtroPeriodo === opt.value
+                    ? 'bg-white text-emerald-700 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
 
-        {dados.proximosAgendamentos.length === 0 ? (
+        {proximosFiltrados.length === 0 ? (
           <div className="py-12 text-center text-gray-400 text-sm">
-            Nenhum agendamento confirmado próximo.
+            {filtroPeriodo === 'hoje'   && 'Nenhuma consulta marcada para hoje.'}
+            {filtroPeriodo === 'amanha' && 'Nenhuma consulta marcada para amanhã.'}
+            {filtroPeriodo === '7dias'  && 'Nenhuma consulta nos próximos 7 dias.'}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -204,7 +366,7 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {dados.proximosAgendamentos.map((ag) => {
+                {proximosFiltrados.map((ag) => {
                   const st = STATUS_LABEL[ag.status] ?? { label: ag.status, cls: 'bg-gray-100 text-gray-700' };
                   return (
                     <tr key={ag.id} className="hover:bg-gray-50 transition-colors">
