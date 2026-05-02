@@ -337,30 +337,30 @@ export default function Profissionais() {
       {/* Modal convênios do profissional */}
       {modalConvenios && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
-            <div className="flex items-center justify-between mb-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col p-6">
+            <div className="flex items-center justify-between mb-4 flex-shrink-0">
               <h2 className="text-lg font-semibold text-gray-900">Convênios atendidos</h2>
               <button onClick={() => setModalConvenios(null)} className="text-gray-400 hover:text-gray-600">
                 <X size={20} />
               </button>
             </div>
-            <p className="text-sm text-gray-500 mb-4">
+            <p className="text-sm text-gray-500 mb-4 flex-shrink-0">
               Selecione os convênios que <strong>{modalConvenios.nome}</strong> atende:
             </p>
-            <div className="space-y-2 mb-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1 mb-5 overflow-y-auto pr-1 flex-1 min-h-0">
               {conveniosClinica.map((c) => (
                 <label key={c.id} className="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-gray-50">
                   <input
                     type="checkbox"
                     checked={conveniosSelecionados.includes(c.id)}
                     onChange={() => toggleConvenio(c.id)}
-                    className="w-4 h-4 accent-purple-600"
+                    className="w-4 h-4 accent-purple-600 flex-shrink-0"
                   />
-                  <span className="text-sm text-gray-800">{c.nome}</span>
+                  <span className="text-sm text-gray-800 truncate">{c.nome}</span>
                 </label>
               ))}
             </div>
-            <div className="flex gap-3">
+            <div className="flex gap-3 flex-shrink-0 pt-3 border-t border-gray-100">
               <button
                 onClick={() => setModalConvenios(null)}
                 className="flex-1 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50"
