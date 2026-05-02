@@ -11,7 +11,7 @@ export async function dashboardRoutes(fastify) {
 
     const agora = new Date();
 
-    // Limites do dia atual em UTC (sem ajuste de fuso — comparações são feitas contra dataHora do banco)
+    // Limites do dia atual em horário local
     const inicioDia = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate(), 0, 0, 0);
     const fimDia    = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate(), 23, 59, 59);
 
@@ -20,34 +20,49 @@ export async function dashboardRoutes(fastify) {
     const inicioSemana = new Date(inicioDia.getTime() - diaSemana * 86400000);
     const fimSemana    = new Date(inicioSemana.getTime() + 7 * 86400000);
 
+    // Próximas 2 horas — usado para destacar "vai chegar paciente"
+    const proximas2hLimit = new Date(agora.getTime() + 2 * 3600 * 1000);
+
     // Últimos 30 dias para taxa de confirmação
     const inicio30Dias = new Date(agora.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-    const [totalHoje, totalSemana, agendamentos30Dias, proximosAgendamentos] = await Promise.all([
-      // Total de agendamentos hoje (exceto cancelados e no-show)
+    const [
+      agendamentosHojeRaw,
+      proximas2hCount,
+      agendamentosSemanaRaw,
+      agendamentos30Dias,
+      proximosAgendamentos,
+      conversasEntradaHoje,
+      agendamentosCriadosHoje,
+    ] = await Promise.all([
+      // Todos os agendamentos de hoje (com status para breakdown)
+      prisma.agendamento.findMany({
+        where: { clinicaId, dataHora: { gte: inicioDia, lte: fimDia } },
+        select: { status: true },
+      }),
+
+      // Próximas 2h — confirmados/agendados que precisam de atenção
       prisma.agendamento.count({
         where: {
           clinicaId,
-          dataHora: { gte: inicioDia, lte: fimDia },
-          status: { notIn: ['cancelado', 'no_show'] },
+          dataHora: { gte: agora, lte: proximas2hLimit },
+          status: { in: ['agendado', 'confirmado'] },
         },
       }),
 
-      // Total de agendamentos da semana (exceto cancelados e no-show)
-      prisma.agendamento.count({
+      // Agendamentos da semana corrente — dataHora para agregar por dia no JS
+      prisma.agendamento.findMany({
         where: {
           clinicaId,
           dataHora: { gte: inicioSemana, lt: fimSemana },
           status: { notIn: ['cancelado', 'no_show'] },
         },
+        select: { dataHora: true },
       }),
 
-      // Agendamentos dos últimos 30 dias para calcular taxa de confirmação
+      // Agendamentos dos últimos 30 dias para taxa de confirmação
       prisma.agendamento.findMany({
-        where: {
-          clinicaId,
-          dataHora: { gte: inicio30Dias },
-        },
+        where: { clinicaId, dataHora: { gte: inicio30Dias } },
         select: { status: true },
       }),
 
@@ -65,21 +80,87 @@ export async function dashboardRoutes(fastify) {
           profissional: { select: { nome: true, especialidade: true } },
         },
       }),
+
+      // Conversas de entrada hoje — distinct por telefone via select
+      prisma.conversa.findMany({
+        where: {
+          clinicaId,
+          direcao: 'entrada',
+          createdAt: { gte: inicioDia, lte: fimDia },
+        },
+        select: { telefone: true },
+        distinct: ['telefone'],
+      }),
+
+      // Agendamentos criados hoje (createdAt, não dataHora)
+      prisma.agendamento.count({
+        where: { clinicaId, createdAt: { gte: inicioDia, lte: fimDia } },
+      }),
     ]);
 
-    // Taxa de confirmação: (confirmados + concluídos) / total dos últimos 30 dias
+    // ── Breakdown de hoje por status ──
+    const hojeBreakdown = {
+      total: agendamentosHojeRaw.length,
+      confirmado: agendamentosHojeRaw.filter((a) => a.status === 'confirmado').length,
+      agendado:   agendamentosHojeRaw.filter((a) => a.status === 'agendado').length,
+      concluido:  agendamentosHojeRaw.filter((a) => a.status === 'concluido').length,
+      cancelado:  agendamentosHojeRaw.filter((a) => a.status === 'cancelado').length,
+      noShow:     agendamentosHojeRaw.filter((a) => a.status === 'no_show').length,
+    };
+    // "Ativos hoje" = excluindo cancelados e no-show (mantém retrocompatibilidade do KPI antigo)
+    const totalHoje = hojeBreakdown.total - hojeBreakdown.cancelado - hojeBreakdown.noShow;
+
+    // ── Agregação por dia da semana corrente (para o mini gráfico) ──
+    const DIAS_SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+    const agendamentosPorDia = Array.from({ length: 7 }, (_, i) => {
+      const dataDia = new Date(inicioSemana.getTime() + i * 86400000);
+      const dataIni = new Date(dataDia.getFullYear(), dataDia.getMonth(), dataDia.getDate(), 0, 0, 0);
+      const dataFim = new Date(dataDia.getFullYear(), dataDia.getMonth(), dataDia.getDate(), 23, 59, 59);
+      const count = agendamentosSemanaRaw.filter(
+        (a) => a.dataHora >= dataIni && a.dataHora <= dataFim
+      ).length;
+      const isToday = dataDia.toDateString() === agora.toDateString();
+      return {
+        data: dataDia.toISOString().slice(0, 10),
+        diaSemana: DIAS_SEMANA[i],
+        count,
+        isToday,
+      };
+    });
+    const totalSemana = agendamentosSemanaRaw.length;
+
+    // ── Taxa de confirmação 30 dias ──
     const total30 = agendamentos30Dias.length;
     const confirmados30 = agendamentos30Dias.filter(
       (a) => ['agendado', 'confirmado', 'concluido'].includes(a.status),
     ).length;
     const taxaConfirmacao = total30 > 0 ? Math.round((confirmados30 / total30) * 100) : 0;
 
+    // ── Saúde do bot ──
+    const conversasHoje = conversasEntradaHoje.length;
+
     return reply.send({
       success: true,
       data: {
+        // Hoje detalhado
         agendamentosHoje: totalHoje,
+        hojeBreakdown,
+        proximas2h: proximas2hCount,
+
+        // Semana
         agendamentosSemana: totalSemana,
+        agendamentosPorDia,
+
+        // 30 dias
         taxaConfirmacao,
+
+        // Saúde do bot
+        botHoje: {
+          conversas: conversasHoje,
+          agendamentosCriados: agendamentosCriadosHoje,
+        },
+
+        // Lista
         proximosAgendamentos,
       },
     });

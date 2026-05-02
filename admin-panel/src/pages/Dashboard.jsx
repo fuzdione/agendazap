@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../services/api.js';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { CalendarDays, CalendarCheck2, TrendingUp, Clock } from 'lucide-react';
+import { Clock, MessageSquare, CalendarRange, AlertCircle } from 'lucide-react';
 
 const STATUS_LABEL = {
   agendado:   { label: 'Agendado',   cls: 'bg-yellow-100 text-yellow-700' },
@@ -12,17 +12,15 @@ const STATUS_LABEL = {
   no_show:    { label: 'No-show',    cls: 'bg-orange-100 text-orange-700' },
 };
 
-function StatCard({ icon: Icon, label, value, sub, color }) {
+/** Pílula de status pequena, usada no breakdown de "Hoje" */
+function StatusPill({ count, label, color, icon = null }) {
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-sm text-gray-500 font-medium">{label}</p>
-        <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${color}`}>
-          <Icon size={18} className="text-white" />
-        </div>
+    <div className={`flex-1 min-w-[80px] rounded-lg px-3 py-2 ${color}`}>
+      <div className="flex items-center gap-1 text-xs font-medium opacity-80">
+        {icon}
+        {label}
       </div>
-      <p className="text-3xl font-bold text-gray-900">{value}</p>
-      {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
+      <p className="text-xl font-bold mt-0.5">{count}</p>
     </div>
   );
 }
@@ -70,39 +68,119 @@ export default function Dashboard() {
   }
 
   if (erro) {
-    return (
-      <div className="text-center py-16 text-red-500">{erro}</div>
-    );
+    return <div className="text-center py-16 text-red-500">{erro}</div>;
   }
 
+  const hoje = dados.hojeBreakdown ?? { total: 0, confirmado: 0, agendado: 0, concluido: 0, cancelado: 0, noShow: 0 };
+  const naoConfirmados = hoje.agendado;
+  const dataDeHoje = format(new Date(), "EEEE, dd 'de' MMMM", { locale: ptBR });
+
+  // Para o gráfico — encontra valor máximo para escala proporcional
+  const maxSemana = Math.max(...(dados.agendamentosPorDia ?? []).map((d) => d.count), 1);
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
 
-      {/* Métricas */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard
-          icon={CalendarDays}
-          label="Agendamentos hoje"
-          value={dados.agendamentosHoje}
-          color="bg-emerald-500"
-        />
-        <StatCard
-          icon={CalendarCheck2}
-          label="Agendamentos na semana"
-          value={dados.agendamentosSemana}
-          color="bg-blue-500"
-        />
-        <StatCard
-          icon={TrendingUp}
-          label="Taxa de confirmação"
-          value={`${dados.taxaConfirmacao}%`}
-          sub="Últimos 30 dias"
-          color="bg-violet-500"
-        />
+      {/* ── Bloco HOJE — destaque máximo ── */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
+          <div>
+            <p className="text-xs text-gray-400 uppercase tracking-wide">Hoje</p>
+            <p className="text-lg font-semibold text-gray-900 capitalize">{dataDeHoje}</p>
+          </div>
+          {dados.proximas2h > 0 && (
+            <div className="flex items-center gap-2 bg-orange-50 text-orange-700 px-3 py-1.5 rounded-lg text-sm font-medium">
+              <Clock size={15} />
+              {dados.proximas2h} {dados.proximas2h === 1 ? 'consulta' : 'consultas'} nas próximas 2h
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+          <StatusPill count={hoje.total} label="Total"      color="bg-gray-50 text-gray-800" />
+          <StatusPill count={hoje.confirmado} label="Confirmados" color="bg-emerald-50 text-emerald-700" />
+          <StatusPill count={hoje.agendado}   label="Aguardando"  color="bg-yellow-50 text-yellow-700" />
+          <StatusPill count={hoje.concluido}  label="Concluídos"  color="bg-blue-50 text-blue-700" />
+          <StatusPill count={hoje.cancelado + hoje.noShow} label="Cancel./No-show" color="bg-red-50 text-red-700" />
+        </div>
+
+        {naoConfirmados > 0 && (
+          <div className="mt-4 flex items-start gap-2 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2 text-sm text-yellow-800">
+            <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
+            <p>
+              <strong>{naoConfirmados}</strong> {naoConfirmados === 1 ? 'consulta ainda não confirmou' : 'consultas ainda não confirmaram'} a presença — vale ligar para o paciente.
+            </p>
+          </div>
+        )}
       </div>
 
-      {/* Próximos agendamentos */}
+      {/* ── Linha com 2 cards: Esta semana (gráfico) + Bot ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Mini gráfico da semana */}
+        <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <CalendarRange size={16} className="text-gray-400" />
+              <h2 className="font-semibold text-gray-800 text-sm">Esta semana</h2>
+            </div>
+            <p className="text-xs text-gray-500">
+              <span className="font-semibold text-gray-700">{dados.agendamentosSemana}</span> agendamentos
+            </p>
+          </div>
+          <div className="flex items-end gap-2 h-32 mt-4">
+            {(dados.agendamentosPorDia ?? []).map((d) => {
+              const heightPct = (d.count / maxSemana) * 100;
+              return (
+                <div key={d.data} className="flex flex-col items-center flex-1 gap-1.5 min-w-0">
+                  <span className={`text-xs font-medium ${d.count > 0 ? 'text-gray-700' : 'text-gray-300'}`}>
+                    {d.count}
+                  </span>
+                  <div className="w-full flex-1 flex items-end">
+                    <div
+                      className={`w-full rounded-t-md transition-colors ${
+                        d.isToday ? 'bg-emerald-500' : 'bg-emerald-200'
+                      }`}
+                      style={{
+                        height: d.count > 0 ? `${Math.max(heightPct, 8)}%` : '2px',
+                      }}
+                      title={`${d.count} agendamento(s)`}
+                    />
+                  </div>
+                  <span className={`text-xs ${d.isToday ? 'text-emerald-700 font-semibold' : 'text-gray-500'}`}>
+                    {d.diaSemana}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Saúde do bot */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <MessageSquare size={16} className="text-gray-400" />
+            <h2 className="font-semibold text-gray-800 text-sm">Bot hoje</h2>
+          </div>
+          <div className="space-y-3 mt-4">
+            <div className="flex items-baseline justify-between">
+              <span className="text-sm text-gray-500">Conversas iniciadas</span>
+              <span className="text-2xl font-bold text-gray-900">{dados.botHoje?.conversas ?? 0}</span>
+            </div>
+            <div className="flex items-baseline justify-between">
+              <span className="text-sm text-gray-500">Agendamentos criados</span>
+              <span className="text-2xl font-bold text-emerald-600">{dados.botHoje?.agendamentosCriados ?? 0}</span>
+            </div>
+            <div className="pt-2 border-t border-gray-100">
+              <p className="text-xs text-gray-500">
+                Taxa de confirmação 30d: <strong className="text-gray-700">{dados.taxaConfirmacao}%</strong>
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Próximos agendamentos com botões inline ── */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
           <Clock size={18} className="text-gray-400" />
