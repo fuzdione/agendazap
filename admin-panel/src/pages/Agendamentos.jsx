@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../services/api.js';
 import { format, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Filter } from 'lucide-react';
+import { Filter, Search, X, RotateCcw } from 'lucide-react';
 
 /** Formata Date como YYYY-MM-DD para os inputs date e a query do backend. */
 function isoDateLocal(date) {
@@ -89,8 +89,21 @@ export default function Agendamentos() {
     ...presetPorTab('proximos'),
     profissional_id: '',
     status: '',
+    busca: '',
     page: 1,
   }));
+
+  // Input de busca com debounce — 400ms após o usuário parar de digitar,
+  // o termo é propagado para `filtros.busca` e a query é refeita.
+  const [buscaInput, setBuscaInput] = useState('');
+
+  useEffect(() => {
+    if (buscaInput === filtros.busca) return;
+    const t = setTimeout(() => {
+      setFiltros((p) => ({ ...p, busca: buscaInput, page: 1 }));
+    }, 400);
+    return () => clearTimeout(t);
+  }, [buscaInput, filtros.busca]);
 
   useEffect(() => {
     carregarProfissionais();
@@ -154,6 +167,22 @@ export default function Agendamentos() {
     }));
   }
 
+  /** Reseta tudo para o default (tab "Próximos", sem profissional/status/busca). */
+  function limparFiltros() {
+    setBuscaInput('');
+    setTabAtiva('proximos');
+    setFiltros({
+      ...presetPorTab('proximos'),
+      profissional_id: '',
+      status: '',
+      busca: '',
+      page: 1,
+    });
+  }
+
+  // Detecta se há filtros não-default ativos (para mostrar/esconder o botão limpar)
+  const temFiltroAtivo = !!(filtros.profissional_id || filtros.status || filtros.busca);
+
   return (
     <div className="space-y-5">
       <h1 className="text-2xl font-bold text-gray-900">Agendamentos</h1>
@@ -175,13 +204,46 @@ export default function Agendamentos() {
         ))}
       </div>
 
+      {/* Busca */}
+      <div className="relative">
+        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+        <input
+          type="text"
+          value={buscaInput}
+          onChange={(e) => setBuscaInput(e.target.value)}
+          placeholder="Buscar por nome ou telefone do paciente..."
+          maxLength={100}
+          className="w-full pl-9 pr-9 py-2.5 text-sm border border-gray-200 rounded-lg bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+        />
+        {buscaInput && (
+          <button
+            onClick={() => setBuscaInput('')}
+            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-700 rounded-md"
+            title="Limpar busca"
+            aria-label="Limpar busca"
+          >
+            <X size={16} />
+          </button>
+        )}
+      </div>
+
       {/* Filtros */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-        <div className="flex items-center gap-2 mb-3">
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
           <Filter size={16} className="text-gray-400" />
           <span className="text-sm font-medium text-gray-600">Filtros</span>
           {tabAtiva === null && (
-            <span className="text-xs text-gray-400 ml-auto">(filtros customizados — clique numa tab para resetar)</span>
+            <span className="text-xs text-gray-400 hidden sm:inline">(filtros customizados — clique numa tab para resetar)</span>
+          )}
+          {(temFiltroAtivo || tabAtiva === null) && (
+            <button
+              onClick={limparFiltros}
+              className="ml-auto flex items-center gap-1 text-xs text-gray-500 hover:text-emerald-700 font-medium px-2 py-1 rounded hover:bg-emerald-50 transition-colors"
+              title="Limpar todos os filtros"
+            >
+              <RotateCcw size={13} />
+              Limpar filtros
+            </button>
           )}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -246,7 +308,76 @@ export default function Agendamentos() {
           <div className="py-14 text-center text-gray-400 text-sm">Nenhum agendamento encontrado.</div>
         ) : (
           <>
-            <div className="overflow-x-auto">
+            {/* Mobile: cards (< md) */}
+            <div className="md:hidden divide-y divide-gray-100">
+              {agendamentos.map((ag) => {
+                const st = STATUS_CONFIG[ag.status] ?? { label: ag.status, cls: 'bg-gray-100 text-gray-700' };
+                const acoes = ACOES_POR_STATUS[ag.status] ?? [];
+                return (
+                  <div key={ag.id} className="p-4">
+                    {/* Linha 1: data + status */}
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <p className="text-sm font-semibold text-gray-800">
+                        {format(new Date(ag.dataHora), "dd/MM/yy 'às' HH:mm", { locale: ptBR })}
+                      </p>
+                      <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${st.cls}`}>
+                          {st.label}
+                        </span>
+                        {ag.status === 'confirmado' && ag.confirmedBy && (
+                          <span className={`px-1.5 py-0.5 rounded text-xs ${ag.confirmedBy === 'paciente' ? 'bg-sky-50 text-sky-600' : 'bg-violet-50 text-violet-600'}`}>
+                            {ag.confirmedBy === 'paciente' ? '📱 paciente' : '🖥️ admin'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Paciente */}
+                    <p className="text-sm font-medium text-gray-900">{ag.paciente?.nome ?? '—'}</p>
+                    <p className="text-xs text-gray-400 mb-2">{ag.paciente?.telefone}</p>
+
+                    {/* Profissional + tipo + duração */}
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-600">
+                      <span className="font-medium">{ag.profissional?.nome}</span>
+                      <span className="text-gray-400">·</span>
+                      <span>{ag.profissional?.especialidade}</span>
+                      <span className="text-gray-400">·</span>
+                      <span>{ag.duracaoMin}min</span>
+                    </div>
+                    <div className="mt-2">
+                      {ag.tipoConsulta === 'convenio' ? (
+                        <span className="text-xs bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded font-medium">
+                          {ag.convenio?.nome ?? 'Convênio'}
+                        </span>
+                      ) : (
+                        <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-medium">
+                          Particular
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Ações */}
+                    {acoes.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-gray-100">
+                        {acoes.map((acao) => (
+                          <button
+                            key={acao}
+                            disabled={!!atualizando[ag.id]}
+                            onClick={() => atualizarStatus(ag.id, acao)}
+                            className={`px-3 py-1.5 text-xs font-medium rounded disabled:opacity-40 transition-colors ${COR_ACAO[acao]}`}
+                          >
+                            {atualizando[ag.id] ? '...' : LABEL_ACAO[acao]}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Desktop: tabela (md+) */}
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs text-gray-500 border-b border-gray-100">

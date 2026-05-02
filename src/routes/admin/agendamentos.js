@@ -24,12 +24,13 @@ export async function agendamentosAdminRoutes(fastify) {
           page:            { type: 'integer', minimum: 1, default: 1 },
           limit:           { type: 'integer', minimum: 1, maximum: 100, default: 20 },
           ordem:           { type: 'string', enum: ['asc', 'desc'], default: 'asc' },
+          busca:           { type: 'string', maxLength: 100 },
         },
       },
     },
   }, async (request, reply) => {
     const clinicaId = request.user.clinicaId;
-    const { data_inicio, data_fim, profissional_id, status, page = 1, limit = 20, ordem = 'asc' } = request.query;
+    const { data_inicio, data_fim, profissional_id, status, page = 1, limit = 20, ordem = 'asc', busca } = request.query;
 
     const where = { clinicaId };
 
@@ -44,6 +45,22 @@ export async function agendamentosAdminRoutes(fastify) {
 
     if (profissional_id) where.profissionalId = profissional_id;
     if (status)          where.status = status;
+
+    // Busca por nome (case-insensitive) ou telefone (só dígitos) do paciente.
+    // O OR fica entre parêntese — combina com os demais filtros via AND.
+    if (busca) {
+      const termo = busca.trim();
+      if (termo.length > 0) {
+        const apenasDigitos = termo.replace(/\D/g, '');
+        const orConditions = [
+          { paciente: { nome: { contains: termo, mode: 'insensitive' } } },
+        ];
+        if (apenasDigitos.length > 0) {
+          orConditions.push({ paciente: { telefone: { contains: apenasDigitos } } });
+        }
+        where.OR = orConditions;
+      }
+    }
 
     const [total, agendamentos] = await Promise.all([
       prisma.agendamento.count({ where }),
