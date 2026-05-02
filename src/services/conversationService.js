@@ -699,9 +699,10 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
 
   // 8d. Garante exibição dos horários ao transitar para escolhendo_horario.
   // O modelo às vezes apenas ecoa o nome do profissional sem listar os slots.
-  // Só injeta slots se o paciente ainda NÃO escolheu horário (data_hora vazio) —
-  // caso contrário, o bot está apenas pedindo o nome e o calendário não cabe ali.
+  // Não injeta se devePerguntarNome=true: o GPT-4o-mini retorna novo_estado='escolhendo_horario'
+  // mesmo quando pede o nome, e sem essa guarda o calendário seria colado após a mensagem de nome.
   if (
+    !devePerguntarNome &&
     controle.novo_estado === 'escolhendo_horario' &&
     contextoAtualizado.profissional_id &&
     !contextoAtualizado.data_hora &&
