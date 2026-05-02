@@ -85,6 +85,9 @@ function formatarListaPlanos(conveniosAtivos) {
  * Aplica a transição determinística para o estado escolhendo_especialidade
  * após o paciente escolher tipo de consulta (particular ou convênio).
  * Atualiza o estado no banco e retorna a mensagem com a lista filtrada de profissionais.
+ *
+ * Caso especial: se só houver 1 profissional disponível, pula a etapa de seleção
+ * e vai direto para escolhendo_horario, listando os horários do único médico.
  */
 async function transicionarParaEspecialidade(clinicaId, telefone, contextoAtual, profissionaisFiltrados, tipoConsulta, convenioNome) {
   const novoContexto = {
@@ -93,18 +96,41 @@ async function transicionarParaEspecialidade(clinicaId, telefone, contextoAtual,
     convenio_nome: tipoConsulta === 'convenio' ? convenioNome : null,
   };
 
-  await prisma.estadoConversa.update({
-    where: { telefone_clinicaId: { telefone, clinicaId } },
-    data: { estado: 'escolhendo_especialidade', contextoJson: novoContexto },
-  });
-
   if (profissionaisFiltrados.length === 0) {
+    await prisma.estadoConversa.update({
+      where: { telefone_clinicaId: { telefone, clinicaId } },
+      data: { estado: 'escolhendo_especialidade', contextoJson: novoContexto },
+    });
     return tipoConsulta === 'convenio'
       ? `Infelizmente, no momento, nenhum profissional atende ${convenioNome}. Deseja agendar como particular? 🙏`
       : 'No momento não temos profissionais disponíveis para atendimento particular. Por favor, entre em contato com a recepção.';
   }
 
   const tituloTipo = tipoConsulta === 'convenio' ? `Convênio ${convenioNome}` : 'Particular';
+
+  // Único profissional disponível: pula a seleção e vai direto para horários.
+  if (profissionaisFiltrados.length === 1) {
+    const profUnico = profissionaisFiltrados[0];
+    const contextoComProf = { ...novoContexto, profissional_id: profUnico.id };
+
+    await prisma.estadoConversa.update({
+      where: { telefone_clinicaId: { telefone, clinicaId } },
+      data: { estado: 'escolhendo_horario', contextoJson: contextoComProf },
+    });
+
+    const agora = new Date();
+    const dataFim = new Date(agora.getTime() + JANELA_SLOTS_DIAS * 24 * 60 * 60 * 1000);
+    const slots = await getCalendarSlots(clinicaId, profUnico.id, agora, dataFim);
+    const slotsMsg = formatarSlotsParaMensagem([{ profissional: profUnico, slots }], profUnico.id);
+
+    return `Ótimo! ${tituloTipo}. Vou te encaixar com ${profUnico.nome} (${profUnico.especialidade}). 😊\n\nEstes são os horários disponíveis:\n\n${slotsMsg}\n\nPor favor, escolha um horário para a consulta.`;
+  }
+
+  await prisma.estadoConversa.update({
+    where: { telefone_clinicaId: { telefone, clinicaId } },
+    data: { estado: 'escolhendo_especialidade', contextoJson: novoContexto },
+  });
+
   return `Ótimo! ${tituloTipo}. Temos os seguintes profissionais disponíveis — digite o número para escolher: 😊\n\n${formatarListaProfissionaisVisivel(profissionaisFiltrados)}`;
 }
 
@@ -624,11 +650,12 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
 
   // 8d. Garante exibição dos horários ao transitar para escolhendo_horario.
   // O modelo às vezes apenas ecoa o nome do profissional sem listar os slots.
-  // Sempre que o estado novo for escolhendo_horario e houver profissional_id,
-  // verificamos se a resposta já contém horários (marcador "📅"); caso contrário, anexamos.
+  // Só injeta slots se o paciente ainda NÃO escolheu horário (data_hora vazio) —
+  // caso contrário, o bot está apenas pedindo o nome e o calendário não cabe ali.
   if (
     controle.novo_estado === 'escolhendo_horario' &&
     contextoAtualizado.profissional_id &&
+    !contextoAtualizado.data_hora &&
     !respostaFinal.includes('📅')
   ) {
     const slotsFormatados = formatarSlotsParaMensagem(horariosDisponiveis, contextoAtualizado.profissional_id);

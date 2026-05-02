@@ -817,7 +817,7 @@ describe('conversationService — interceptação determinística (escolhendo_co
     prisma.convenio.findMany.mockResolvedValue([CONVENIO_AMIL, CONVENIO_UNIMED]);
   }
 
-  it('estado escolhendo_convenio + "1" → transita para escolhendo_especialidade com particular, sem chamar LLM', async () => {
+  it('estado escolhendo_convenio + "1" + único profissional → pula seleção e vai para escolhendo_horario com slots', async () => {
     setupClinicaComConvenios({ estadoAtual: 'escolhendo_convenio' });
 
     const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, '1', CLINICA);
@@ -825,6 +825,33 @@ describe('conversationService — interceptação determinística (escolhendo_co
     expect(processMessage).not.toHaveBeenCalled();
     expect(resposta).toContain('Particular');
     expect(resposta).toContain(PROFISSIONAL_COM_CONVENIO.nome);
+    expect(resposta).not.toContain('digite o número');
+    expect(prisma.estadoConversa.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          estado: 'escolhendo_horario',
+          contextoJson: expect.objectContaining({
+            tipo_consulta: 'particular',
+            profissional_id: PROFISSIONAL_COM_CONVENIO.id,
+          }),
+        }),
+      })
+    );
+  });
+
+  it('estado escolhendo_convenio + "1" + múltiplos profissionais → mantém lista para o paciente escolher', async () => {
+    const SEGUNDO_PROF = { ...PROFISSIONAL, id: 'prof-uuid-002', nome: 'Dra. Maria Santos', convenios: [] };
+    setupPrismaMocks({ estadoAtual: 'escolhendo_convenio' });
+    prisma.profissional.findMany.mockResolvedValue([PROFISSIONAL_COM_CONVENIO, SEGUNDO_PROF]);
+    prisma.convenio.findMany.mockResolvedValue([CONVENIO_AMIL]);
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, '1', CLINICA);
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(resposta).toContain('Particular');
+    expect(resposta).toContain('digite o número');
+    expect(resposta).toContain(PROFISSIONAL_COM_CONVENIO.nome);
+    expect(resposta).toContain(SEGUNDO_PROF.nome);
     expect(prisma.estadoConversa.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -852,7 +879,7 @@ describe('conversationService — interceptação determinística (escolhendo_co
     );
   });
 
-  it('estado escolhendo_plano + número correspondente → resolve plano e transita para escolhendo_especialidade', async () => {
+  it('estado escolhendo_plano + número correspondente + único profissional do plano → vai direto para escolhendo_horario', async () => {
     setupClinicaComConvenios({ estadoAtual: 'escolhendo_plano' });
 
     const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, '1', CLINICA);
@@ -860,11 +887,16 @@ describe('conversationService — interceptação determinística (escolhendo_co
     expect(processMessage).not.toHaveBeenCalled();
     expect(resposta).toContain('Convênio Amil');
     expect(resposta).toContain(PROFISSIONAL_COM_CONVENIO.nome);
+    expect(resposta).not.toContain('digite o número');
     expect(prisma.estadoConversa.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          estado: 'escolhendo_especialidade',
-          contextoJson: expect.objectContaining({ tipo_consulta: 'convenio', convenio_nome: 'Amil' }),
+          estado: 'escolhendo_horario',
+          contextoJson: expect.objectContaining({
+            tipo_consulta: 'convenio',
+            convenio_nome: 'Amil',
+            profissional_id: PROFISSIONAL_COM_CONVENIO.id,
+          }),
         }),
       })
     );
@@ -909,11 +941,16 @@ describe('conversationService — interceptação determinística (escolhendo_co
 
     expect(processMessage).not.toHaveBeenCalled();
     expect(resposta).toContain('Particular');
+    // Único profissional → vai direto para escolhendo_horario
     expect(prisma.estadoConversa.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          estado: 'escolhendo_especialidade',
-          contextoJson: expect.objectContaining({ tipo_consulta: 'particular', convenio_nome: null }),
+          estado: 'escolhendo_horario',
+          contextoJson: expect.objectContaining({
+            tipo_consulta: 'particular',
+            convenio_nome: null,
+            profissional_id: PROFISSIONAL_COM_CONVENIO.id,
+          }),
         }),
       })
     );

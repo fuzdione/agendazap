@@ -155,15 +155,14 @@ export function buildSystemPrompt(clinica, profissionais, horariosDisponiveis, e
   // Instrução de identificação do paciente baseada nos nomes já conhecidos
   const identificacaoPaciente = nomesConhecidos.length > 0
     ? `Pacientes já cadastrados neste telefone: ${nomesConhecidos.join(', ')}.
-Quando o paciente escolher o horário, faça esta pergunta antes de confirmar:
-"Ótimo! Antes de confirmar, essa consulta é para ${nomesConhecidos.join(' ou ')}? Ou está agendando para outra pessoa?"
-- Se confirmar um dos nomes → registre nome_paciente, exiba o resumo completo (profissional, data, horário, nome) e aguarde confirmação explícita ("sim", "confirmo", "pode marcar") antes de usar "acao": "criar_agendamento"
-- Se for outra pessoa → peça o nome completo, registre nome_paciente, exiba o resumo e aguarde confirmação explícita
-- Nunca use "acao": "criar_agendamento" apenas porque o nome foi informado — é obrigatório mostrar o resumo e receber "sim" do paciente`
-    : 'Primeiro contato deste telefone. Ao escolher o horário, pergunte o nome completo com linguagem de transição (ex: "Ótimo! Para confirmar, qual o seu nome completo?"). Após receber o nome, exiba o resumo completo (profissional, data, horário, nome) e aguarde confirmação explícita ("sim", "confirmo") antes de usar "acao": "criar_agendamento".';
+Quando o paciente escolher o horário, faça esta pergunta:
+"Ótimo! Para finalizar, essa consulta é para ${nomesConhecidos.join(' ou ')}? Ou está agendando para outra pessoa?"
+- Quando o paciente responder (escolhendo um nome conhecido OU informando um nome novo) → registre nome_paciente, monte a resposta no formato exato da seção CONFIRMAÇÃO DO AGENDAMENTO e EXECUTE IMEDIATAMENTE acao: "criar_agendamento" no MESMO turno.
+- NÃO pergunte "está tudo certo?", "posso confirmar?" ou similar. NÃO aguarde um "sim" do paciente. O nome informado é a confirmação final — todos os outros dados (profissional, plano, data, horário) já foram escolhidos explicitamente nos turnos anteriores.`
+    : 'Primeiro contato deste telefone. Ao escolher o horário, pergunte: "Ótimo! Para finalizar, qual o seu nome completo?". Quando o paciente informar o nome, monte a resposta no formato exato da seção CONFIRMAÇÃO DO AGENDAMENTO e EXECUTE IMEDIATAMENTE acao: "criar_agendamento" no MESMO turno. NÃO pergunte "está tudo certo?" nem aguarde um "sim" — o nome informado é a confirmação final.';
 
   // Regra de nome completo — injetada no bloco de identificação
-  const regraNomeCompleto = `\nRegra de nome completo: qualquer nome com pelo menos duas palavras (ex: "Silvano Alves", "João Silva") é considerado nome completo. Não peça mais informações nem confirme se "está correto" — apenas registre e prossiga para o resumo de confirmação.`;
+  const regraNomeCompleto = `\nRegra de nome completo: qualquer nome com pelo menos duas palavras (ex: "Silvano Alves", "João Silva") é considerado nome completo. Não peça mais informações nem confirmação adicional — registre nome_paciente e EXECUTE acao: "criar_agendamento" no MESMO turno, exibindo a confirmação ✅.`;
 
   const mensagemBoasVindas = clinica.configJson?.mensagem_boas_vindas;
   const telefoneFallback = clinica.configJson?.telefone_fallback;
@@ -185,7 +184,7 @@ Hoje é ${agoraBrasilia}. Ao interpretar datas mencionadas pelo paciente e ao ge
 - Quando a mensagem for vaga ou a confiança na interpretação for baixa, peça esclarecimento de forma amigável.
 - Quando não entender a mensagem, peça esclarecimento de forma amigável. Nunca adicione sugestão de ligar para a recepção como sufixo de respostas normais.
 - Ao confirmar um agendamento, sempre repita: profissional, especialidade, data e horário.
-- Use "agendada", "confirmada" ou "marcada" somente após coletar todos os dados necessários e ao executar acao = "criar_agendamento". Enquanto ainda houver perguntas pendentes (nome, confirmação), use linguagem de transição: "Ótimo! Antes de confirmar..." ou "Quase lá! Só preciso saber...".
+- Use "agendada", "confirmada" ou "marcada" somente após coletar todos os dados necessários e ao executar acao = "criar_agendamento". Enquanto ainda houver perguntas pendentes (nome), use linguagem de transição: "Ótimo! Para finalizar..." ou "Quase lá! Só preciso saber...".
 
 ## IDENTIFICAÇÃO DO PACIENTE
 ${identificacaoPaciente}${regraNomeCompleto}
@@ -280,7 +279,7 @@ O JSON deve seguir exatamente este formato:
 </json>
 
 Regras para o JSON:
-- Use "acao": "criar_agendamento" quando o paciente confirmou explicitamente E todos os campos de dados_extraidos estão preenchidos E não há agendamento anterior a remarcar.
+- Use "acao": "criar_agendamento" assim que todos os campos obrigatórios de dados_extraidos estiverem preenchidos (incluindo nome_paciente) E não houver agendamento anterior a remarcar. Não espere uma segunda confirmação ("sim", "confirmo") — após o nome ser informado, dispare a ação no MESMO turno em que monta o resumo ✅.
 - Use "acao": "remarcar_agendamento" quando o paciente quer mudar data/hora de uma consulta existente e já confirmou o novo horário. Preencha "agendamento_id" com o ID da consulta a ser substituída.
 - Ao identificar intenção de remarcar, preencha imediatamente "agendamento_id" com o UUID da lista acima e "intencao": "remarcar" — preserve esses valores em todos os turnos seguintes até a conclusão.
 - Quando o paciente está remarcando, use "remarcar_agendamento" — isso garante que o agendamento anterior seja cancelado corretamente.
