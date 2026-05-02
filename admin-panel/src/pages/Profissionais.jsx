@@ -170,70 +170,75 @@ export default function Profissionais() {
         ) : (
           <div className="divide-y divide-gray-100">
             {profissionais.map((p) => (
-              <div key={p.id} className="flex items-center gap-4 px-5 py-4">
-                {/* Avatar */}
-                <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center flex-shrink-0">
-                  <span className="text-emerald-700 font-bold text-sm">{p.nome.charAt(0)}</span>
-                </div>
+              <div key={p.id} className="px-4 sm:px-5 py-4">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:gap-4">
+                  {/* Bloco principal: nome, especialidade, badges */}
+                  <div className="flex-1 min-w-0">
+                    {/* Nome + status (status só inline no mobile) */}
+                    <div className="flex items-start justify-between gap-2 mb-0.5">
+                      <p className="font-medium text-gray-900 truncate">{p.nome}</p>
+                      <span className={`sm:hidden flex-shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${
+                        p.ativo ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'
+                      }`}>
+                        {p.ativo ? 'Ativo' : 'Inativo'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500">{p.especialidade} · {p.duracaoConsultaMin} min</p>
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {p.atendeParticular !== false && (
+                        <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">Particular</span>
+                      )}
+                      {(p.convenios ?? []).map((c) => (
+                        <span key={c.id} className="text-xs bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded">{c.nome}</span>
+                      ))}
+                      {p.calendarId && (
+                        <span className="text-xs bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded">Calendar</span>
+                      )}
+                    </div>
+                  </div>
 
-                {/* Info */}
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-gray-900 truncate">{p.nome}</p>
-                  <p className="text-xs text-gray-500">{p.especialidade} · {p.duracaoConsultaMin} min</p>
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {p.atendeParticular !== false && (
-                      <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">Particular</span>
+                  {/* Status — só desktop (no mobile aparece ao lado do nome acima) */}
+                  <span className={`hidden sm:inline-block flex-shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${
+                    p.ativo ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'
+                  }`}>
+                    {p.ativo ? 'Ativo' : 'Inativo'}
+                  </span>
+
+                  {/* Ações — separadas por linha sutil no mobile */}
+                  <div className="flex items-center justify-end gap-1 sm:gap-2 mt-3 sm:mt-0 pt-3 sm:pt-0 border-t sm:border-t-0 border-gray-100 flex-shrink-0">
+                    {conveniosClinica.length > 0 && (
+                      <button
+                        onClick={() => abrirModalConvenios(p)}
+                        title="Gerenciar convênios"
+                        className="px-2 py-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors text-xs font-medium"
+                      >
+                        Conv.
+                      </button>
                     )}
-                    {(p.convenios ?? []).map((c) => (
-                      <span key={c.id} className="text-xs bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded">{c.nome}</span>
-                    ))}
-                    {p.calendarId && (
-                      <span className="text-xs bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded">Calendar</span>
+                    <button
+                      onClick={() => abrirModalCalendar(p)}
+                      title="Vincular Google Calendar"
+                      className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                    >
+                      <Link size={16} />
+                    </button>
+                    <button
+                      onClick={() => abrirModal(p)}
+                      title="Editar"
+                      className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                    >
+                      <Pencil size={16} />
+                    </button>
+                    {p.ativo && (
+                      <button
+                        onClick={() => desativar(p.id)}
+                        title="Desativar"
+                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      >
+                        <Trash2 size={16} />
+                      </button>
                     )}
                   </div>
-                </div>
-
-                {/* Status */}
-                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                  p.ativo ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'
-                }`}>
-                  {p.ativo ? 'Ativo' : 'Inativo'}
-                </span>
-
-                {/* Ações */}
-                <div className="flex items-center gap-2">
-                  {conveniosClinica.length > 0 && (
-                    <button
-                      onClick={() => abrirModalConvenios(p)}
-                      title="Gerenciar convênios"
-                      className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors text-xs font-medium"
-                    >
-                      Conv.
-                    </button>
-                  )}
-                  <button
-                    onClick={() => abrirModalCalendar(p)}
-                    title="Vincular Google Calendar"
-                    className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                  >
-                    <Link size={16} />
-                  </button>
-                  <button
-                    onClick={() => abrirModal(p)}
-                    title="Editar"
-                    className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
-                  >
-                    <Pencil size={16} />
-                  </button>
-                  {p.ativo && (
-                    <button
-                      onClick={() => desativar(p.id)}
-                      title="Desativar"
-                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  )}
                 </div>
               </div>
             ))}
