@@ -1,8 +1,47 @@
 import { useEffect, useState } from 'react';
 import { api } from '../services/api.js';
-import { format } from 'date-fns';
+import { format, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Search, Filter } from 'lucide-react';
+import { Filter } from 'lucide-react';
+
+/** Formata Date como YYYY-MM-DD para os inputs date e a query do backend. */
+function isoDateLocal(date) {
+  return format(date, 'yyyy-MM-dd');
+}
+
+/**
+ * Presets de período aplicados pelas tabs.
+ * Cada preset define data_inicio, data_fim e a ordenação adequada para a visão.
+ * - "proximos": de hoje em diante, ordem ascendente (próxima consulta no topo)
+ * - "hoje": apenas o dia corrente, ascendente
+ * - "semana": hoje + próximos 7 dias, ascendente
+ * - "historico": antes de hoje, descendente (mais recente primeiro)
+ * - "todos": sem filtro de data, descendente
+ */
+function presetPorTab(tab) {
+  const hoje = new Date();
+  switch (tab) {
+    case 'hoje':
+      return { data_inicio: isoDateLocal(hoje), data_fim: isoDateLocal(hoje), ordem: 'asc' };
+    case 'semana':
+      return { data_inicio: isoDateLocal(hoje), data_fim: isoDateLocal(addDays(hoje, 7)), ordem: 'asc' };
+    case 'historico':
+      return { data_inicio: '', data_fim: isoDateLocal(addDays(hoje, -1)), ordem: 'desc' };
+    case 'todos':
+      return { data_inicio: '', data_fim: '', ordem: 'desc' };
+    case 'proximos':
+    default:
+      return { data_inicio: isoDateLocal(hoje), data_fim: '', ordem: 'asc' };
+  }
+}
+
+const TABS = [
+  { value: 'proximos',  label: 'Próximos' },
+  { value: 'hoje',      label: 'Hoje' },
+  { value: 'semana',    label: 'Esta semana' },
+  { value: 'historico', label: 'Histórico' },
+  { value: 'todos',     label: 'Todos' },
+];
 
 const STATUS_CONFIG = {
   agendado:   { label: 'Agendado',   cls: 'bg-yellow-100 text-yellow-700' },
@@ -41,13 +80,17 @@ export default function Agendamentos() {
   const [atualizando, setAtualizando] = useState({});
   const [profissionais, setProfissionais] = useState([]);
 
-  const [filtros, setFiltros] = useState({
-    data_inicio: '',
-    data_fim: '',
+  // Tab visual ativa — "proximos" como default, alinhado com o caso de uso da
+  // recepção (ver o que está vindo). Vira null quando o usuário mexe nas datas
+  // manualmente (estado "custom").
+  const [tabAtiva, setTabAtiva] = useState('proximos');
+
+  const [filtros, setFiltros] = useState(() => ({
+    ...presetPorTab('proximos'),
     profissional_id: '',
     status: '',
     page: 1,
-  });
+  }));
 
   useEffect(() => {
     carregarProfissionais();
@@ -96,17 +139,50 @@ export default function Agendamentos() {
 
   function setFiltro(campo, valor) {
     setFiltros((p) => ({ ...p, [campo]: valor, page: 1 }));
+    // Mexer manualmente nas datas tira a marcação visual da tab — entra modo "custom"
+    if (campo === 'data_inicio' || campo === 'data_fim') {
+      setTabAtiva(null);
+    }
+  }
+
+  function aplicarTab(tab) {
+    setTabAtiva(tab);
+    setFiltros((p) => ({
+      ...p,
+      ...presetPorTab(tab),
+      page: 1,
+    }));
   }
 
   return (
     <div className="space-y-5">
       <h1 className="text-2xl font-bold text-gray-900">Agendamentos</h1>
 
+      {/* Tabs de período rápido */}
+      <div className="flex flex-wrap gap-1 bg-gray-100 p-0.5 rounded-lg text-sm w-fit">
+        {TABS.map((opt) => (
+          <button
+            key={opt.value}
+            onClick={() => aplicarTab(opt.value)}
+            className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
+              tabAtiva === opt.value
+                ? 'bg-white text-emerald-700 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
       {/* Filtros */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
         <div className="flex items-center gap-2 mb-3">
           <Filter size={16} className="text-gray-400" />
           <span className="text-sm font-medium text-gray-600">Filtros</span>
+          {tabAtiva === null && (
+            <span className="text-xs text-gray-400 ml-auto">(filtros customizados — clique numa tab para resetar)</span>
+          )}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div>

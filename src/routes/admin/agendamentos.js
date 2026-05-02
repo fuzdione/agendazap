@@ -23,19 +23,23 @@ export async function agendamentosAdminRoutes(fastify) {
           status:          { type: 'string', enum: ['agendado', 'confirmado', 'cancelado', 'concluido', 'no_show'] },
           page:            { type: 'integer', minimum: 1, default: 1 },
           limit:           { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+          ordem:           { type: 'string', enum: ['asc', 'desc'], default: 'asc' },
         },
       },
     },
   }, async (request, reply) => {
     const clinicaId = request.user.clinicaId;
-    const { data_inicio, data_fim, profissional_id, status, page = 1, limit = 20 } = request.query;
+    const { data_inicio, data_fim, profissional_id, status, page = 1, limit = 20, ordem = 'asc' } = request.query;
 
     const where = { clinicaId };
 
+    // Datas vêm como YYYY-MM-DD do frontend. Interpretamos como dia local BRT
+    // (UTC-3, fixo desde 2019) para evitar bug do parse default que usa UTC
+    // e descartaria consultas da tarde do dia escolhido como data_fim.
     if (data_inicio || data_fim) {
       where.dataHora = {};
-      if (data_inicio) where.dataHora.gte = new Date(data_inicio);
-      if (data_fim)    where.dataHora.lte = new Date(data_fim);
+      if (data_inicio) where.dataHora.gte = new Date(`${data_inicio}T00:00:00-03:00`);
+      if (data_fim)    where.dataHora.lte = new Date(`${data_fim}T23:59:59.999-03:00`);
     }
 
     if (profissional_id) where.profissionalId = profissional_id;
@@ -45,7 +49,7 @@ export async function agendamentosAdminRoutes(fastify) {
       prisma.agendamento.count({ where }),
       prisma.agendamento.findMany({
         where,
-        orderBy: { dataHora: 'asc' },
+        orderBy: { dataHora: ordem },
         skip: (page - 1) * limit,
         take: limit,
         include: {
