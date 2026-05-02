@@ -119,59 +119,61 @@ export default function Convenios() {
         </div>
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Nome</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Profissionais</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {convenios.map((c) => (
-                <tr key={c.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium text-gray-900">{c.nome}</td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => alternarAtivo(c)}
-                      title={c.ativo ? 'Clique para desativar' : 'Clique para ativar'}
-                      className="flex items-center gap-1.5 text-xs font-medium"
-                    >
-                      {c.ativo ? (
-                        <><CheckCircle size={14} className="text-emerald-500" /><span className="text-emerald-600">Ativo</span></>
-                      ) : (
-                        <><XCircle size={14} className="text-gray-400" /><span className="text-gray-400">Inativo</span></>
-                      )}
-                    </button>
-                  </td>
-                  <td className="px-4 py-3 text-gray-500">
-                    {c.profissionais?.length > 0
-                      ? c.profissionais.map((pc) => pc.profissional.nome).join(', ')
-                      : <span className="text-gray-300 italic">nenhum vinculado</span>}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2 justify-end">
-                      <button
-                        onClick={() => abrirModal(c)}
-                        className="text-gray-400 hover:text-gray-700 transition-colors"
-                        title="Editar nome"
-                      >
-                        <Pencil size={15} />
-                      </button>
-                      <button
-                        onClick={() => remover(c)}
-                        className="text-gray-400 hover:text-red-600 transition-colors"
-                        title="Remover"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Nome</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600 hidden md:table-cell">Profissionais</th>
+                  <th className="px-4 py-3" />
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {convenios.map((c) => (
+                  <tr key={c.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 font-medium text-gray-900 max-w-[200px] truncate">{c.nome}</td>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => alternarAtivo(c)}
+                        title={c.ativo ? 'Clique para desativar' : 'Clique para ativar'}
+                        className="flex items-center gap-1.5 text-xs font-medium"
+                      >
+                        {c.ativo ? (
+                          <><CheckCircle size={14} className="text-emerald-500" /><span className="text-emerald-600">Ativo</span></>
+                        ) : (
+                          <><XCircle size={14} className="text-gray-400" /><span className="text-gray-400">Inativo</span></>
+                        )}
+                      </button>
+                    </td>
+                    <td className="px-4 py-3 text-gray-500 hidden md:table-cell">
+                      {c.profissionais?.length > 0
+                        ? c.profissionais.map((pc) => pc.profissional.nome).join(', ')
+                        : <span className="text-gray-300 italic">nenhum vinculado</span>}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2 justify-end">
+                        <button
+                          onClick={() => abrirModal(c)}
+                          className="text-gray-400 hover:text-gray-700 transition-colors p-1"
+                          title="Editar nome"
+                        >
+                          <Pencil size={15} />
+                        </button>
+                        <button
+                          onClick={() => remover(c)}
+                          className="text-gray-400 hover:text-red-600 transition-colors p-1"
+                          title="Remover"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

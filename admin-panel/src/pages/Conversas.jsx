@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../services/api.js';
 import { format, formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Search, MessageCircle, User } from 'lucide-react';
+import { Search, MessageCircle, User, ArrowLeft } from 'lucide-react';
 
 export default function Conversas() {
   const [contatos, setContatos] = useState([]);
@@ -58,7 +58,10 @@ export default function Conversas() {
     <div className="flex h-[calc(100vh-8rem)] bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
 
       {/* ── Painel esquerdo: lista de contatos ── */}
-      <div className="w-80 flex-shrink-0 border-r border-gray-100 flex flex-col">
+      {/* No mobile, fica oculto quando uma conversa está aberta (mostra o painel de mensagens em tela cheia) */}
+      <div className={`w-full md:w-80 md:flex-shrink-0 border-r border-gray-100 flex-col ${
+        contatoAtivo ? 'hidden md:flex' : 'flex'
+      }`}>
         <div className="px-4 py-3 border-b border-gray-100">
           <h1 className="text-base font-semibold text-gray-900 mb-2">Conversas</h1>
           <div className="relative">
@@ -125,7 +128,8 @@ export default function Conversas() {
       </div>
 
       {/* ── Painel direito: mensagens ── */}
-      <div className="flex-1 flex flex-col min-w-0">
+      {/* No mobile, oculto quando nenhuma conversa está aberta */}
+      <div className={`flex-1 flex-col min-w-0 ${contatoAtivo ? 'flex' : 'hidden md:flex'}`}>
         {!contatoAtivo ? (
           <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
             <MessageCircle size={40} className="mb-3 text-gray-300" />
@@ -133,16 +137,24 @@ export default function Conversas() {
           </div>
         ) : (
           <>
-            {/* Header da conversa */}
-            <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center">
+            {/* Header da conversa — botão voltar só aparece no mobile */}
+            <div className="px-4 md:px-5 py-3 border-b border-gray-100 flex items-center gap-3">
+              <button
+                onClick={() => setContatoAtivo(null)}
+                className="md:hidden text-gray-500 hover:text-gray-800 -ml-1 flex-shrink-0"
+                title="Voltar para lista de contatos"
+                aria-label="Voltar"
+              >
+                <ArrowLeft size={20} />
+              </button>
+              <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0">
                 <User size={15} className="text-emerald-600" />
               </div>
-              <div>
-                <p className="text-sm font-semibold text-gray-900">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-gray-900 truncate">
                   {contatoAtivo.nome ?? contatoAtivo.telefone}
                 </p>
-                <p className="text-xs text-gray-400">
+                <p className="text-xs text-gray-400 truncate">
                   {contatoAtivo.nome ? contatoAtivo.telefone + ' · ' : ''}
                   {contatoAtivo.total} mensagem(ns)
                 </p>
