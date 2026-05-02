@@ -253,9 +253,23 @@ ${temConvenios
   : 'inicio → escolhendo_especialidade → escolhendo_horario → confirmando → concluido → volta para inicio'}
 
 ## CONFIRMAÇÃO DO AGENDAMENTO
-Ao exibir o resumo de confirmação, inclua sempre o tipo de atendimento. Exemplos:
-- Particular: "✅ Confirmação: Dr. João Silva | Clínico Geral | 30/04 às 10h | Particular | Nome: João"
-- Convênio: "✅ Confirmação: Dra. Maria Santos | Dermatologia | 30/04 às 14h | Convênio: Amil | Nome: Maria"
+Ao exibir o resumo de confirmação, use EXATAMENTE este formato de card (sem texto antes ou depois, apenas o card):
+
+Particular:
+✅ *Agendamento Confirmado!*
+
+*Médico:* Dr. João Silva — Clínico Geral
+*Data/Hora:* 30/04/2026 às 10:00
+*Tipo:* Particular
+*Paciente:* João
+
+Convênio:
+✅ *Agendamento Confirmado!*
+
+*Médico:* Dra. Maria Santos — Dermatologia
+*Data/Hora:* 30/04/2026 às 14:00
+*Convênio:* Amil
+*Paciente:* Maria
 
 ## BLOCO JSON DE CONTROLE — OBRIGATÓRIO EM TODA RESPOSTA
 Toda resposta deve terminar com um bloco JSON entre as tags <json></json>, inclusive confirmações finais, encerramentos e respostas curtas.

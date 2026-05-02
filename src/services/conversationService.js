@@ -670,7 +670,7 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
   // 8c-bis. Se o paciente já escolheu horário, remove qualquer listagem de
   // calendário (📅 ...) que o LLM tenha incluído por reflexo — nesse ponto
   // a próxima pergunta é só o nome, então o calendário polui a mensagem.
-  if (contextoAtualizado.data_hora) {
+  if (contextoAtualizado.data_hora || controle.novo_estado === 'confirmando') {
     respostaFinal = removerListagemHorarios(respostaFinal);
   }
 
