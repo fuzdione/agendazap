@@ -668,17 +668,23 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
   let respostaFinal = mensagemParaPaciente;
 
   // 8c-bis. Interceptação determinística da pergunta de nome do paciente.
-  // O LLM ignora sistematicamente a instrução de não incluir o calendário ao
-  // perguntar o nome — a solução é gerar essa mensagem em código, assim como já
-  // é feito para escolhendo_convenio e escolhendo_plano.
-  // Ativa em dois cenários:
-  //   (a) LLM retorna novo_estado === 'confirmando'
-  //   (b) Estado anterior era 'escolhendo_horario' e o contexto agora tem data_hora
-  //       (LLM pode não retornar 'confirmando' mesmo tendo extraído o horário)
+  // O LLM ignora a instrução de omitir o calendário nesse turno e às vezes
+  // nem retorna novo_estado='confirmando' nem data_hora no JSON.
+  // Três gatilhos (qualquer um basta):
+  //   (a) novo_estado === 'confirmando'
+  //   (b) estávamos em escolhendo_horario e LLM mudou de estado
+  //   (c) estávamos em escolhendo_horario e o texto contém "Para finalizar"
+  //       ou "para quem" — sinal textual mais confiável que o JSON neste caso
+  const llmPediuNome =
+    estadoConversa.estado === 'escolhendo_horario' && (
+      controle.novo_estado !== 'escolhendo_horario' ||
+      respostaFinal.includes('Para finalizar') ||
+      respostaFinal.toLowerCase().includes('para quem')
+    );
   const devePerguntarNome = !contextoAtualizado.nome_paciente && (
-    controle.novo_estado === 'confirmando' ||
-    (estadoConversa.estado === 'escolhendo_horario' && !!contextoAtualizado.data_hora)
+    controle.novo_estado === 'confirmando' || llmPediuNome
   );
+  console.log(`[8c-bis] prevState=${estadoConversa.estado} novoEstado=${controle.novo_estado} data_hora=${contextoAtualizado.data_hora} llmPediuNome=${llmPediuNome} devePerguntarNome=${devePerguntarNome}`);
   if (devePerguntarNome) {
     const listaFormatada = nomesConhecidos.length > 0
       ? nomesConhecidos.map((n) => `• ${n}`).join('\n')
@@ -686,9 +692,8 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
     respostaFinal = listaFormatada
       ? `Para finalizar, essa consulta é para:\n\n${listaFormatada}\n\nOu está agendando para outra pessoa?`
       : 'Para finalizar, qual o seu nome completo?';
-    console.log('[confirmando] pergunta de nome gerada deterministicamente');
+    console.log('[8c-bis] pergunta de nome gerada deterministicamente');
   } else if (contextoAtualizado.data_hora) {
-    // Fallback: remove calendário em outros casos onde o horário já foi escolhido
     respostaFinal = removerListagemHorarios(respostaFinal);
   }
 
