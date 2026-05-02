@@ -667,10 +667,18 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
 
   let respostaFinal = mensagemParaPaciente;
 
-  // 8c-bis. Se o paciente já escolheu horário, remove qualquer listagem de
-  // calendário (📅 ...) que o LLM tenha incluído por reflexo — nesse ponto
-  // a próxima pergunta é só o nome, então o calendário polui a mensagem.
-  if (contextoAtualizado.data_hora || controle.novo_estado === 'confirmando') {
+  // 8c-bis. Interceptação determinística da pergunta de nome do paciente.
+  // O LLM ignora sistematicamente a instrução de não incluir o calendário ao
+  // perguntar o nome — a solução é gerar essa mensagem em código, assim como já
+  // é feito para escolhendo_convenio e escolhendo_plano.
+  // Ativa quando o LLM transita para 'confirmando' e nome_paciente ainda não está preenchido.
+  if (controle.novo_estado === 'confirmando' && !contextoAtualizado.nome_paciente) {
+    respostaFinal = nomesConhecidos.length > 0
+      ? `Ótimo! Para finalizar, essa consulta é para ${nomesConhecidos.join(' ou ')}? Ou está agendando para outra pessoa?`
+      : 'Ótimo! Para finalizar, qual o seu nome completo?';
+    console.log('[confirmando] pergunta de nome gerada deterministicamente');
+  } else if (contextoAtualizado.data_hora) {
+    // Fallback: remove calendário em outros casos onde o horário já foi escolhido
     respostaFinal = removerListagemHorarios(respostaFinal);
   }
 
