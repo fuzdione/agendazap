@@ -9,8 +9,8 @@ const MAX_HISTORY = 10;
 // Janela de busca de slots: próximos 7 dias corridos
 const JANELA_SLOTS_DIAS = 7;
 
-// Emojis numerados para listas exibidas ao paciente (1️⃣ … 9️⃣)
-const EMOJI_NUMS = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣'];
+// Numeração sequencial para listas exibidas ao paciente
+const numItem = (i) => `${i + 1}.`;
 
 /** Normaliza string: minúsculas, sem acentos, trimmed. */
 function normalizar(s) {
@@ -42,9 +42,9 @@ function matchPlano(msg, conveniosAtivos) {
   const trimmed = String(msg ?? '').trim();
   if (!trimmed || conveniosAtivos.length === 0) return null;
 
-  // Número simples ou emoji number
+  // Número simples (1, 2, …)
   for (let i = 0; i < conveniosAtivos.length; i++) {
-    if (trimmed === String(i + 1) || trimmed === EMOJI_NUMS[i]) {
+    if (trimmed === String(i + 1)) {
       return conveniosAtivos[i];
     }
   }
@@ -70,14 +70,14 @@ function matchPlano(msg, conveniosAtivos) {
 /** Lista numerada de profissionais para o paciente (sem UUID). */
 function formatarListaProfissionaisVisivel(profissionais) {
   return profissionais
-    .map((p, i) => `${EMOJI_NUMS[i] ?? `${i + 1}.`} ${p.nome} — ${p.especialidade} (${p.duracaoConsultaMin} min)`)
+    .map((p, i) => `${numItem(i)} ${p.nome} — ${p.especialidade} (${p.duracaoConsultaMin} min)`)
     .join('\n');
 }
 
 /** Lista numerada de planos de saúde para o paciente. */
 function formatarListaPlanos(conveniosAtivos) {
   return conveniosAtivos
-    .map((c, i) => `${EMOJI_NUMS[i] ?? `${i + 1}.`} ${c.nome}`)
+    .map((c, i) => `${numItem(i)} ${c.nome}`)
     .join('\n');
 }
 
@@ -564,7 +564,7 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
         where: { telefone_clinicaId: { telefone, clinicaId } },
         data: { estado: 'escolhendo_plano', contextoJson: novoContexto },
       });
-      return `Qual o seu plano de saúde? 😊\n${formatarListaPlanos(conveniosAtivosComProf)}`;
+      return `Qual o seu plano de saúde? 😊 Digite o número ou o nome do plano:\n${formatarListaPlanos(conveniosAtivosComProf)}`;
     }
     // Sem match → cai no LLM (entrada livre como "ainda não sei", etc.)
   }
@@ -593,7 +593,7 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
     }
 
     // Não bateu — re-pergunta com a lista, sem cair no LLM (texto fixo)
-    return `Não entendi. Qual destes planos você possui? 😊\n${formatarListaPlanos(conveniosAtivosComProf)}`;
+    return `Não entendi. Digite o número ou o nome do plano:\n${formatarListaPlanos(conveniosAtivosComProf)}`;
   }
 
   // 5. Obtém horários disponíveis via Google Calendar (com fallback para mock)
