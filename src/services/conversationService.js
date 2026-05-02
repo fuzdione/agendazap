@@ -106,7 +106,7 @@ async function transicionarParaEspecialidade(clinicaId, telefone, contextoAtual,
       : 'No momento não temos profissionais disponíveis para atendimento particular. Por favor, entre em contato com a recepção.';
   }
 
-  const tituloTipo = tipoConsulta === 'convenio' ? `Convênio ${convenioNome}` : 'Particular';
+  const tituloTipo = tipoConsulta === 'convenio' ? `Convênio *${convenioNome}*` : 'Particular';
 
   // Único profissional disponível: pula a seleção e vai direto para horários.
   if (profissionaisFiltrados.length === 1) {
@@ -564,7 +564,7 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
         where: { telefone_clinicaId: { telefone, clinicaId } },
         data: { estado: 'escolhendo_plano', contextoJson: novoContexto },
       });
-      return `Qual o seu plano de saúde? 😊 Digite o número ou o nome do plano:\n${formatarListaPlanos(conveniosAtivosComProf)}`;
+      return `Qual o seu plano de saúde? 😊\nDigite o número ou o nome do plano:\n${formatarListaPlanos(conveniosAtivosComProf)}`;
     }
     // Sem match → cai no LLM (entrada livre como "ainda não sei", etc.)
   }
