@@ -671,11 +671,21 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
   // O LLM ignora sistematicamente a instrução de não incluir o calendário ao
   // perguntar o nome — a solução é gerar essa mensagem em código, assim como já
   // é feito para escolhendo_convenio e escolhendo_plano.
-  // Ativa quando o LLM transita para 'confirmando' e nome_paciente ainda não está preenchido.
-  if (controle.novo_estado === 'confirmando' && !contextoAtualizado.nome_paciente) {
-    respostaFinal = nomesConhecidos.length > 0
-      ? `Ótimo! Para finalizar, essa consulta é para ${nomesConhecidos.join(' ou ')}? Ou está agendando para outra pessoa?`
-      : 'Ótimo! Para finalizar, qual o seu nome completo?';
+  // Ativa em dois cenários:
+  //   (a) LLM retorna novo_estado === 'confirmando'
+  //   (b) Estado anterior era 'escolhendo_horario' e o contexto agora tem data_hora
+  //       (LLM pode não retornar 'confirmando' mesmo tendo extraído o horário)
+  const devePerguntarNome = !contextoAtualizado.nome_paciente && (
+    controle.novo_estado === 'confirmando' ||
+    (estadoConversa.estado === 'escolhendo_horario' && !!contextoAtualizado.data_hora)
+  );
+  if (devePerguntarNome) {
+    const listaFormatada = nomesConhecidos.length > 0
+      ? nomesConhecidos.map((n) => `• ${n}`).join('\n')
+      : null;
+    respostaFinal = listaFormatada
+      ? `Para finalizar, essa consulta é para:\n\n${listaFormatada}\n\nOu está agendando para outra pessoa?`
+      : 'Para finalizar, qual o seu nome completo?';
     console.log('[confirmando] pergunta de nome gerada deterministicamente');
   } else if (contextoAtualizado.data_hora) {
     // Fallback: remove calendário em outros casos onde o horário já foi escolhido
