@@ -162,7 +162,9 @@ Quando o paciente escolher o horário, faça esta pergunta:
     : 'Primeiro contato deste telefone. Ao escolher o horário, pergunte: "Ótimo! Para finalizar, qual o seu nome completo?". Quando o paciente informar o nome, monte a resposta no formato exato da seção CONFIRMAÇÃO DO AGENDAMENTO e EXECUTE IMEDIATAMENTE acao: "criar_agendamento" no MESMO turno. NÃO pergunte "está tudo certo?" nem aguarde um "sim" — o nome informado é a confirmação final.';
 
   // Regra de nome completo — injetada no bloco de identificação
-  const regraNomeCompleto = `\nRegra de nome completo: qualquer nome com pelo menos duas palavras (ex: "Silvano Alves", "João Silva") é considerado nome completo. Não peça mais informações nem confirmação adicional — registre nome_paciente e EXECUTE acao: "criar_agendamento" no MESMO turno, exibindo a confirmação ✅.`;
+  const regraNomeCompleto = `\nRegra de nome completo: qualquer nome com pelo menos duas palavras (ex: "Silvano Alves", "João Silva") é considerado nome completo. Não peça mais informações nem confirmação adicional — registre nome_paciente e EXECUTE acao: "criar_agendamento" no MESMO turno, exibindo a confirmação ✅.
+
+PROIBIDO ao perguntar o nome do paciente: NÃO repita a lista de horários (linhas com 📅) na mesma mensagem. O paciente já escolheu o horário no turno anterior — incluir o calendário aqui é redundante e confunde. A pergunta do nome deve ser uma mensagem curta e isolada.`;
 
   const mensagemBoasVindas = clinica.configJson?.mensagem_boas_vindas;
   const telefoneFallback = clinica.configJson?.telefone_fallback;

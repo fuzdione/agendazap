@@ -158,6 +158,25 @@ async function getAvailableSlots(clinicaId, profissionais) {
 }
 
 /**
+ * Remove blocos de listagem de horários (linhas começando com 📅 + a linha de slots
+ * imediatamente seguinte) que o LLM tenha incluído por reflexo. Usado quando o
+ * paciente já escolheu horário (data_hora preenchido) e a próxima pergunta é o
+ * nome — calendário ali confunde e suja a mensagem.
+ * @param {string} text
+ * @returns {string}
+ */
+function removerListagemHorarios(text) {
+  if (!text) return text;
+  // Linha "📅 ...:" seguida de uma linha de slots; consome opcionalmente uma
+  // linha em branco depois. Repetições agrupadas para limpar múltiplos dias.
+  return text
+    .replace(/(?:📅[^\n]*\n[^\n]*\n?\n?)+/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
  * Formata os slots disponíveis de um profissional para exibição no chat.
  * Retorna string pronta para enviar ao paciente ou mensagem de fallback.
  * @param {Array} horariosDisponiveis - Resultado de getAvailableSlots
@@ -647,6 +666,13 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
   }
 
   let respostaFinal = mensagemParaPaciente;
+
+  // 8c-bis. Se o paciente já escolheu horário, remove qualquer listagem de
+  // calendário (📅 ...) que o LLM tenha incluído por reflexo — nesse ponto
+  // a próxima pergunta é só o nome, então o calendário polui a mensagem.
+  if (contextoAtualizado.data_hora) {
+    respostaFinal = removerListagemHorarios(respostaFinal);
+  }
 
   // 8d. Garante exibição dos horários ao transitar para escolhendo_horario.
   // O modelo às vezes apenas ecoa o nome do profissional sem listar os slots.

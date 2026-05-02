@@ -239,6 +239,33 @@ describe('conversationService — handleIncomingMessage: máquina de estados', (
     );
   });
 
+  it('paciente já tem data_hora + LLM inclui calendário no texto → calendário é removido da resposta', async () => {
+    setupPrismaMocks({
+      estadoAtual: 'escolhendo_horario',
+      contextoJson: {
+        profissional_id: PROFISSIONAL.id,
+        data_hora: '2026-05-05T11:00:00-03:00',
+      },
+    });
+    processMessage.mockResolvedValueOnce({
+      mensagemParaPaciente:
+        'Ótimo! Para finalizar, qual o seu nome completo?\n\n📅 Segunda, 04/05/2026:\n08:00 | 08:40 | 09:20\n\n📅 Terça, 05/05/2026:\n08:40 | 09:20 | 10:00',
+      controle: {
+        intencao: 'agendar',
+        novo_estado: 'escolhendo_horario',
+        dados_extraidos: { especialidade: null, profissional_id: null, tipo_consulta: null, convenio_nome: null, data_hora: null, nome_paciente: null, agendamento_id: null },
+        acao: 'nenhuma',
+        confianca: 0.9,
+      },
+    });
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'terça 8h', CLINICA);
+
+    expect(resposta).toContain('Para finalizar');
+    expect(resposta).not.toContain('📅');
+    expect(resposta).not.toContain('08:00 | 08:40');
+  });
+
   it('mensagem fora do escopo em qualquer estado → não muda o estado', async () => {
     setupPrismaMocks({ estadoAtual: 'escolhendo_especialidade' });
     processMessage.mockResolvedValueOnce(makeControle({
