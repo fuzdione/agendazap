@@ -50,6 +50,20 @@ export default function Dashboard() {
     carregarDados();
   }, []);
 
+  // Filtro Hoje / Amanhã / Próximos 7 dias — feito client-side no array já carregado.
+  // IMPORTANTE: este useMemo precisa ficar antes dos early returns (if loading / if erro)
+  // para não violar as Rules of Hooks (mudança de ordem entre renders quebra a tela).
+  const proximosFiltrados = useMemo(() => {
+    const lista = dados?.proximosAgendamentos ?? [];
+    if (filtroPeriodo === '7dias') return lista;
+    return lista.filter((ag) => {
+      const dt = new Date(ag.dataHora);
+      if (filtroPeriodo === 'hoje') return isToday(dt);
+      if (filtroPeriodo === 'amanha') return isTomorrow(dt);
+      return true;
+    });
+  }, [dados, filtroPeriodo]);
+
   async function carregarDados() {
     try {
       setLoading(true);
@@ -100,18 +114,6 @@ export default function Dashboard() {
   // Top profissionais da semana — escala proporcional ao topo
   const topProfs = dados.topProfissionais ?? [];
   const maxTopProf = Math.max(...topProfs.map((p) => p.count), 1);
-
-  // Filtro Hoje / Amanhã / Próximos 7 dias — feito client-side no array já carregado
-  const proximosFiltrados = useMemo(() => {
-    const lista = dados.proximosAgendamentos ?? [];
-    if (filtroPeriodo === '7dias') return lista;
-    return lista.filter((ag) => {
-      const dt = new Date(ag.dataHora);
-      if (filtroPeriodo === 'hoje') return isToday(dt);
-      if (filtroPeriodo === 'amanha') return isTomorrow(dt);
-      return true;
-    });
-  }, [dados.proximosAgendamentos, filtroPeriodo]);
 
   return (
     <div className="space-y-5">
