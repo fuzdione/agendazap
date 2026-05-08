@@ -32,7 +32,10 @@ export const sendReminderWorker = new Worker(
       console.log(`[sendReminder] agendamento ${agendamentoId} não encontrado — ignorando`);
       return;
     }
-    if (!['agendado', 'confirmado'].includes(agendamento.status)) {
+    // Só dispara para 'agendado'. Se o status mudou para 'confirmado' (paciente confirmou
+    // por outro caminho ou admin confirmou manualmente) entre o agendamento do job e a
+    // execução, suprime o lembrete — pedir confirmação seria redundante.
+    if (agendamento.status !== 'agendado') {
       console.log(`[sendReminder] agendamento ${agendamentoId} status=${agendamento.status} — ignorando`);
       return;
     }

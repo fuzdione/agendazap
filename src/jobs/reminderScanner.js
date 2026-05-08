@@ -23,10 +23,12 @@ export const reminderScannerWorker = new Worker(
     const dataMin = new Date(agora.getTime() + horasMin * 60 * 60 * 1000);
     const dataMax = new Date(agora.getTime() + horasMax * 60 * 60 * 1000);
 
+    // Só varre 'agendado' — agendamentos já 'confirmado' (pelo paciente ou admin) não
+    // precisam de lembrete pedindo confirmação.
     const agendamentos = await prisma.agendamento.findMany({
       where: {
         dataHora: { gte: dataMin, lte: dataMax },
-        status: { in: ['agendado', 'confirmado'] },
+        status: 'agendado',
         lembreteEnviadoAt: null,
       },
       include: { paciente: { select: { id: true, telefone: true } } },

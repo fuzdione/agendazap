@@ -49,7 +49,9 @@ export async function scheduleReminderIfNeeded(agendamentoId) {
     return;
   }
 
-  if (!['agendado', 'confirmado'].includes(agendamento.status)) {
+  // Lembrete só faz sentido para 'agendado' — pacientes já confirmados (via lembrete anterior
+  // ou pelo admin) não precisam ser perguntados de novo.
+  if (agendamento.status !== 'agendado') {
     console.log(`[reminderService] agendamento ${agendamentoId} status=${agendamento.status} — sem lembrete`);
     return;
   }
