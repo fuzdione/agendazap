@@ -152,14 +152,20 @@ export function buildSystemPrompt(clinica, profissionais, horariosDisponiveis, e
   const contexto = estadoConversa?.contextoJson ?? {};
   const contextoFormatado = JSON.stringify(contexto, null, 2);
 
-  // Instrução de identificação do paciente baseada nos nomes já conhecidos
-  const identificacaoPaciente = nomesConhecidos.length > 0
-    ? `Pacientes já cadastrados neste telefone: ${nomesConhecidos.join(', ')}.
+  // Instrução de identificação do paciente.
+  // Se o contexto já tem nome_paciente definido (caso típico em remarcações, onde o
+  // backend pré-preenche o contexto com o paciente do agendamento original), NÃO peça
+  // o nome de novo — só confirma e executa a ação no mesmo turno.
+  const nomeJaNoContexto = estadoConversa?.contextoJson?.nome_paciente;
+  const identificacaoPaciente = nomeJaNoContexto
+    ? `O nome do paciente já foi definido nos turnos anteriores: "${nomeJaNoContexto}". Use exatamente esse nome no campo nome_paciente do JSON e NÃO pergunte o nome de novo. Quando o paciente confirmar o novo horário, monte a resposta no formato exato da seção CONFIRMAÇÃO DO AGENDAMENTO e EXECUTE IMEDIATAMENTE a ação correspondente (remarcar_agendamento se houver agendamento_id no contexto, senão criar_agendamento) no MESMO turno.`
+    : (nomesConhecidos.length > 0
+      ? `Pacientes já cadastrados neste telefone: ${nomesConhecidos.join(', ')}.
 Quando o paciente escolher o horário, faça esta pergunta:
 "Ótimo! Para finalizar, essa consulta é para ${nomesConhecidos.join(' ou ')}? Ou está agendando para outra pessoa?"
 - Quando o paciente responder (escolhendo um nome conhecido OU informando um nome novo) → registre nome_paciente, monte a resposta no formato exato da seção CONFIRMAÇÃO DO AGENDAMENTO e EXECUTE IMEDIATAMENTE acao: "criar_agendamento" no MESMO turno.
 - NÃO pergunte "está tudo certo?", "posso confirmar?" ou similar. NÃO aguarde um "sim" do paciente. O nome informado é a confirmação final — todos os outros dados (profissional, plano, data, horário) já foram escolhidos explicitamente nos turnos anteriores.`
-    : 'Primeiro contato deste telefone. Ao escolher o horário, pergunte: "Ótimo! Para finalizar, qual o seu nome completo?". Quando o paciente informar o nome, monte a resposta no formato exato da seção CONFIRMAÇÃO DO AGENDAMENTO e EXECUTE IMEDIATAMENTE acao: "criar_agendamento" no MESMO turno. NÃO pergunte "está tudo certo?" nem aguarde um "sim" — o nome informado é a confirmação final.';
+      : 'Primeiro contato deste telefone. Ao escolher o horário, pergunte: "Ótimo! Para finalizar, qual o seu nome completo?". Quando o paciente informar o nome, monte a resposta no formato exato da seção CONFIRMAÇÃO DO AGENDAMENTO e EXECUTE IMEDIATAMENTE acao: "criar_agendamento" no MESMO turno. NÃO pergunte "está tudo certo?" nem aguarde um "sim" — o nome informado é a confirmação final.');
 
   // Regra de nome completo — injetada no bloco de identificação
   const regraNomeCompleto = `\nRegra de nome completo: qualquer nome com pelo menos duas palavras (ex: "Silvano Alves", "João Silva") é considerado nome completo. Não peça mais informações nem confirmação adicional — registre nome_paciente e EXECUTE acao: "criar_agendamento" no MESMO turno, exibindo a confirmação ✅.

@@ -237,6 +237,29 @@ describe('claudeService — buildSystemPrompt', () => {
     expect(prompt).toContain('nenhum profissional cadastrado');
   });
 
+  it('quando contexto já tem nome_paciente (caso típico de remarcação) → instrui o LLM a NÃO perguntar o nome', () => {
+    const estadoComNome = {
+      estado: 'escolhendo_horario',
+      contextoJson: { agendamento_id: 'ag-001', nome_paciente: 'Dione Oliveira' },
+    };
+    const prompt = buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoComNome, ['Dione Oliveira']);
+    expect(prompt).toContain('O nome do paciente já foi definido');
+    expect(prompt).toContain('Dione Oliveira');
+    expect(prompt).toContain('NÃO pergunte o nome de novo');
+    // E NÃO inclui a pergunta padrão "essa consulta é para X ou..."
+    expect(prompt).not.toContain('está agendando para outra pessoa?');
+  });
+
+  it('quando contexto NÃO tem nome_paciente mas há nomes conhecidos → mantém pergunta padrão de identificação', () => {
+    const estadoSemNome = {
+      estado: 'escolhendo_horario',
+      contextoJson: {},
+    };
+    const prompt = buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoSemNome, ['Dione Oliveira']);
+    expect(prompt).toContain('está agendando para outra pessoa?');
+    expect(prompt).not.toContain('O nome do paciente já foi definido');
+  });
+
   it('quando clínica NÃO tem convênios → não pergunta sobre tipo de consulta e não lista convênios', () => {
     const prompt = buildSystemPrompt(clinica, profissionais, horariosDisponiveis, estadoConversa, [], [], []);
     expect(prompt).not.toContain('Particular ou Convênio');
