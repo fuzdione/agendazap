@@ -1252,6 +1252,33 @@ describe('conversationService — cancelamento determinístico', () => {
     );
   });
 
+  it('lista com vários pacientes no mesmo telefone → exibe nome do paciente em cada item', async () => {
+    const ag1 = fixAgendamento({ id: 'ag-1', paciente: { nome: 'Kátia Gonçalves' } });
+    const ag2 = fixAgendamento({
+      id: 'ag-2',
+      dataHora: new Date('2026-06-15T15:00:00.000Z'),
+      paciente: { nome: 'João Gonçalves' },
+    });
+    setupPrismaMocks({ estadoAtual: 'inicio' });
+    prisma.agendamento.findMany.mockResolvedValue([ag1, ag2]);
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'cancelar', CLINICA);
+
+    expect(resposta).toContain('Kátia Gonçalves');
+    expect(resposta).toContain('João Gonçalves');
+  });
+
+  it('confirmação de cancelamento com 1 agendamento → exibe nome do paciente', async () => {
+    const ag = fixAgendamento({ paciente: { nome: 'Kátia Gonçalves' } });
+    setupPrismaMocks({ estadoAtual: 'inicio' });
+    prisma.agendamento.findMany.mockResolvedValue([ag]);
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'cancelar', CLINICA);
+
+    expect(resposta).toContain('Kátia Gonçalves');
+    expect(resposta).toContain('Confirma o cancelamento');
+  });
+
   it('inicio + agendamento com status "agendado" (não confirmado pelo lembrete) → ainda assim aparece e pode ser cancelado', async () => {
     // Bug histórico: o filtro era status='confirmado' apenas, então agendamentos recém-criados
     // ficavam invisíveis. Após o fix, status agendado também conta como ativo.

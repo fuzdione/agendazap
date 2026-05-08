@@ -112,7 +112,11 @@ function formatarAgendamentoBreve(ag) {
     timeZone: 'America/Sao_Paulo',
     weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
   });
-  return `*${ag.profissional.nome}* (${ag.profissional.especialidade}) — ${dt}`;
+  // Nome do paciente vem primeiro porque é o que diferencia agendamentos quando o
+  // mesmo telefone atende vários pacientes (paciente principal + familiares).
+  const nomePaciente = ag.paciente?.nome;
+  const prefixoPaciente = nomePaciente ? `*${nomePaciente}* — ` : '';
+  return `${prefixoPaciente}${ag.profissional.nome} (${ag.profissional.especialidade}) — ${dt}`;
 }
 
 /**
@@ -757,7 +761,10 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
             pacienteId: { in: pacientesDoTelefone.map((p) => p.id) },
             status: { in: ['agendado', 'confirmado'] },
           },
-          include: { profissional: { select: { nome: true, especialidade: true } } },
+          include: {
+            profissional: { select: { nome: true, especialidade: true } },
+            paciente: { select: { nome: true } },
+          },
         });
 
         if (!ag) {
