@@ -74,6 +74,84 @@ function formatarListaProfissionaisVisivel(profissionais) {
     .join('\n');
 }
 
+/**
+ * Detecta intenção de cancelar a partir da mensagem do paciente no estado "inicio".
+ * Aceita: "3", "3️⃣", "cancelar", "cancela", "cancelamento", "quero cancelar",
+ * "cancelar consulta", "preciso cancelar", etc.
+ * @param {string} msg
+ * @returns {boolean}
+ */
+function detectarIntencaoCancelar(msg) {
+  const trimmed = String(msg ?? '').trim();
+  if (trimmed === '3' || trimmed === '3️⃣') return true;
+  const n = normalizar(msg);
+  if (!n) return false;
+  // Matches "cancelar", "cancela", "cancelamento" como palavra completa ou substring sem ambiguidade.
+  return /\bcancel\w*/.test(n);
+}
+
+/**
+ * Resposta de confirmação do paciente — sim/não ao cancelamento.
+ * @returns {'sim'|'nao'|null}
+ */
+function parseRespostaSimNao(msg) {
+  const n = normalizar(msg);
+  if (!n) return null;
+  if (['sim', 's', 'confirmo', 'confirmar', 'pode', 'pode cancelar', 'isso', 'correto'].includes(n)) return 'sim';
+  // "cancelar" sozinho é ambíguo nesta etapa (pode significar tanto "confirmar o cancelamento"
+  // quanto "abortar o cancelamento") — propositadamente fora da lista; força re-pergunta.
+  // Idem para "1" e "2": no estado selecionando esses números são índices da lista, então
+  // mapear para sim/não introduziria conflito.
+  if (['nao', 'n', 'voltar', 'volta', 'desistir', 'manter'].includes(n)) return 'nao';
+  return null;
+}
+
+/** Formata um agendamento para exibição compacta ao paciente. */
+function formatarAgendamentoBreve(ag) {
+  const dt = new Date(ag.dataHora).toLocaleString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+  return `*${ag.profissional.nome}* (${ag.profissional.especialidade}) — ${dt}`;
+}
+
+/**
+ * Executa o cancelamento de um agendamento: marca status no banco, remove evento
+ * do Google Calendar (se houver) e cancela o job de lembrete (se houver).
+ *
+ * Idempotente: se o evento ou o job não existirem, segue em frente.
+ * @returns {boolean} true se o status foi atualizado no banco com sucesso.
+ */
+async function executarCancelamento(clinicaId, agendamento) {
+  try {
+    await prisma.agendamento.update({
+      where: { id: agendamento.id },
+      data: { status: 'cancelado' },
+    });
+    console.log(`✅ [executarCancelamento] agendamento ${agendamento.id} marcado como cancelado`);
+  } catch (err) {
+    console.error(`[executarCancelamento] falha ao atualizar status: ${err.message}`);
+    return false;
+  }
+
+  if (agendamento.calendarEventId) {
+    try {
+      await deleteEvent(clinicaId, agendamento.profissionalId, agendamento.calendarEventId);
+      console.log(`🗑️ [executarCancelamento] evento Calendar ${agendamento.calendarEventId} removido`);
+    } catch (err) {
+      console.error(`[executarCancelamento] falha ao deletar evento Calendar: ${err.message}`);
+    }
+  }
+
+  try {
+    await cancelReminder(agendamento.id);
+  } catch (err) {
+    console.error(`[executarCancelamento] falha ao cancelar lembrete: ${err.message}`);
+  }
+
+  return true;
+}
+
 /** Lista numerada de planos de saúde para o paciente. */
 function formatarListaPlanos(conveniosAtivos) {
   return conveniosAtivos
@@ -410,7 +488,7 @@ async function handleRespostaLembrete(clinicaId, telefone, mensagemTexto, contex
     let cancelado = false;
     if (agendamentoId) {
       const agendamento = await prisma.agendamento.findFirst({
-        where: { id: agendamentoId, clinicaId, status: 'confirmado' },
+        where: { id: agendamentoId, clinicaId, status: { in: ['agendado', 'confirmado'] } },
       });
 
       if (agendamento) {
@@ -477,12 +555,15 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
   });
   const nomesConhecidos = pacientesDoTelefone.map((p) => p.nome).filter(Boolean);
 
-  // Agendamentos confirmados futuros deste telefone — enviados ao Claude para remarkação/cancelamento
+  // Agendamentos ativos futuros deste telefone — enviados ao Claude para remarkação/cancelamento.
+  // Inclui status 'agendado' (recém-criado pelo bot) e 'confirmado' (após o lembrete) — ambos
+  // são considerados "ativos" pela visão do paciente. Sem 'agendado' aqui, consultas marcadas
+  // hoje ficavam invisíveis ao fluxo de cancelamento até o lembrete confirmar.
   const agendamentosAtivos = await prisma.agendamento.findMany({
     where: {
       clinicaId,
       pacienteId: { in: pacientesDoTelefone.map((p) => p.id) },
-      status: 'confirmado',
+      status: { in: ['agendado', 'confirmado'] },
       dataHora: { gte: new Date() },
     },
     include: {
@@ -567,6 +648,157 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
       return `Qual o seu plano de saúde? 😊\nDigite o número ou o nome do plano:\n${formatarListaPlanos(conveniosAtivosComProf)}`;
     }
     // Sem match → cai no LLM (entrada livre como "ainda não sei", etc.)
+  }
+
+  // 4d. Interceptação determinística do cancelamento.
+  // Tratamos toda a etapa de cancelamento em código — sem LLM — porque o Claude
+  // historicamente inventava perguntas ("nome da consulta") e respondia "vou cancelar"
+  // sem disparar a ação. O fluxo determinístico:
+  //   inicio + intenção de cancelar →
+  //     0 agendamentos: aviso e fim
+  //     1 agendamento: pergunta de confirmação direta
+  //     >1 agendamentos: lista numerada → escolha → confirmação
+  //   cancelando_agendamento: interpreta seleção e/ou sim/não.
+  if (estadoConversa.estado === 'inicio' && detectarIntencaoCancelar(mensagemTexto)) {
+    if (agendamentosAtivos.length === 0) {
+      // Garante que o estado fica em 'inicio' caso tenha sido alterado em outro lugar
+      await prisma.estadoConversa.update({
+        where: { telefone_clinicaId: { telefone, clinicaId } },
+        data: { estado: 'inicio', contextoJson: {} },
+      });
+      return 'Não encontrei nenhuma consulta agendada neste número para cancelar. ' +
+        'Se você acredita que existe uma consulta, entre em contato com a recepção. 🙏';
+    }
+
+    if (agendamentosAtivos.length === 1) {
+      const ag = agendamentosAtivos[0];
+      await prisma.estadoConversa.update({
+        where: { telefone_clinicaId: { telefone, clinicaId } },
+        data: {
+          estado: 'cancelando_agendamento',
+          contextoJson: { cancelamento_step: 'confirmando', agendamento_id: ag.id },
+        },
+      });
+      return `Encontrei a sua consulta agendada:\n\n${formatarAgendamentoBreve(ag)}\n\n` +
+        `Confirma o cancelamento? Responda *sim* para cancelar ou *não* para manter a consulta. 😊`;
+    }
+
+    // >1 agendamentos: lista numerada
+    const lista = agendamentosAtivos
+      .map((ag, i) => `${numItem(i)} ${formatarAgendamentoBreve(ag)}`)
+      .join('\n');
+    await prisma.estadoConversa.update({
+      where: { telefone_clinicaId: { telefone, clinicaId } },
+      data: {
+        estado: 'cancelando_agendamento',
+        contextoJson: {
+          cancelamento_step: 'selecionando',
+          lista_ids: agendamentosAtivos.map((ag) => ag.id),
+        },
+      },
+    });
+    return `Você tem mais de uma consulta agendada. Qual deseja cancelar? Digite o número:\n\n${lista}`;
+  }
+
+  if (estadoConversa.estado === 'cancelando_agendamento') {
+    const ctx = estadoConversa.contextoJson ?? {};
+
+    // Etapa de seleção: paciente escolheu o número da lista
+    if (ctx.cancelamento_step === 'selecionando' && Array.isArray(ctx.lista_ids)) {
+      const trimmed = String(mensagemTexto ?? '').trim();
+      const idx = parseInt(trimmed, 10) - 1;
+      if (Number.isInteger(idx) && idx >= 0 && idx < ctx.lista_ids.length) {
+        const idEscolhido = ctx.lista_ids[idx];
+        const agEscolhido = agendamentosAtivos.find((ag) => ag.id === idEscolhido);
+        if (!agEscolhido) {
+          // Lista mudou entre turnos (ex: agendamento já foi cancelado por outro caminho)
+          await prisma.estadoConversa.update({
+            where: { telefone_clinicaId: { telefone, clinicaId } },
+            data: { estado: 'inicio', contextoJson: {} },
+          });
+          return 'A consulta selecionada não está mais disponível. Tente novamente, por favor. 🙏';
+        }
+        await prisma.estadoConversa.update({
+          where: { telefone_clinicaId: { telefone, clinicaId } },
+          data: {
+            estado: 'cancelando_agendamento',
+            contextoJson: { cancelamento_step: 'confirmando', agendamento_id: idEscolhido },
+          },
+        });
+        return `Você escolheu:\n\n${formatarAgendamentoBreve(agEscolhido)}\n\n` +
+          `Confirma o cancelamento? Responda *sim* para cancelar ou *não* para manter a consulta. 😊`;
+      }
+
+      // Permite o paciente desistir já na etapa de seleção
+      const desistencia = parseRespostaSimNao(mensagemTexto);
+      if (desistencia === 'nao') {
+        await prisma.estadoConversa.update({
+          where: { telefone_clinicaId: { telefone, clinicaId } },
+          data: { estado: 'inicio', contextoJson: {} },
+        });
+        return 'Tudo bem, sua consulta foi mantida. Posso ajudar com mais alguma coisa? 😊';
+      }
+
+      // Não bateu — re-pergunta com a mesma lista
+      const lista = agendamentosAtivos
+        .map((ag, i) => `${numItem(i)} ${formatarAgendamentoBreve(ag)}`)
+        .join('\n');
+      return `Não entendi. Digite o número da consulta que deseja cancelar:\n\n${lista}`;
+    }
+
+    // Etapa de confirmação: paciente responde sim/não
+    if (ctx.cancelamento_step === 'confirmando' && ctx.agendamento_id) {
+      const resposta = parseRespostaSimNao(mensagemTexto);
+      if (resposta === 'sim') {
+        const ag = await prisma.agendamento.findFirst({
+          where: {
+            id: ctx.agendamento_id,
+            clinicaId,
+            pacienteId: { in: pacientesDoTelefone.map((p) => p.id) },
+            status: { in: ['agendado', 'confirmado'] },
+          },
+          include: { profissional: { select: { nome: true, especialidade: true } } },
+        });
+
+        if (!ag) {
+          await prisma.estadoConversa.update({
+            where: { telefone_clinicaId: { telefone, clinicaId } },
+            data: { estado: 'inicio', contextoJson: {} },
+          });
+          return 'Não consegui localizar a consulta para cancelar. ' +
+            'Talvez ela já tenha sido cancelada. Entre em contato com a recepção se precisar. 🙏';
+        }
+
+        const ok = await executarCancelamento(clinicaId, ag);
+        await prisma.estadoConversa.update({
+          where: { telefone_clinicaId: { telefone, clinicaId } },
+          data: { estado: 'inicio', contextoJson: {} },
+        });
+
+        if (!ok) {
+          return 'Desculpe, ocorreu um erro ao cancelar. Por favor, tente novamente ou entre em contato com a recepção. 🙏';
+        }
+        return `✅ *Consulta cancelada com sucesso!*\n\n${formatarAgendamentoBreve(ag)}\n\n` +
+          `Se quiser reagendar, é só me avisar. 😊`;
+      }
+
+      if (resposta === 'nao') {
+        await prisma.estadoConversa.update({
+          where: { telefone_clinicaId: { telefone, clinicaId } },
+          data: { estado: 'inicio', contextoJson: {} },
+        });
+        return 'Tudo bem, sua consulta foi mantida. Posso ajudar com mais alguma coisa? 😊';
+      }
+
+      // Não entendeu sim/não — re-pergunta sem mudar de estado
+      return 'Não entendi. Por favor, responda *sim* para cancelar a consulta ou *não* para mantê-la. 🙏';
+    }
+
+    // Estado inválido — reseta e cai no LLM
+    await prisma.estadoConversa.update({
+      where: { telefone_clinicaId: { telefone, clinicaId } },
+      data: { estado: 'inicio', contextoJson: {} },
+    });
   }
 
   if (estadoConversa.estado === 'escolhendo_plano' && conveniosAtivosComProf.length > 0) {
@@ -831,7 +1063,7 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
           clinicaId,
           profissionalId: profissional.id,
           pacienteId: { in: pacientesDoTelefone.map((p) => p.id) },
-          status: 'confirmado',
+          status: { in: ['agendado', 'confirmado'] },
           dataHora: { gte: new Date() },
         },
         orderBy: { dataHora: 'asc' },
@@ -953,7 +1185,7 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
             clinicaId,
             profissionalId: contextoAtualizado.profissional_id,
             pacienteId: { in: pacientesDoTelefone.map((p) => p.id) },
-            status: 'confirmado',
+            status: { in: ['agendado', 'confirmado'] },
             dataHora: dataHoraExata,
           },
         });
@@ -966,7 +1198,7 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
           clinicaId,
           profissionalId: contextoAtualizado.profissional_id,
           pacienteId: { in: pacientesDoTelefone.map((p) => p.id) },
-          status: 'confirmado',
+          status: { in: ['agendado', 'confirmado'] },
           dataHora: { gte: new Date() },
         },
         orderBy: { dataHora: 'asc' },

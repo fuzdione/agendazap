@@ -1003,3 +1003,273 @@ describe('conversationService — interceptação determinística (escolhendo_co
     expect(processMessage).toHaveBeenCalled();
   });
 });
+
+// =====================================================================
+// TESTE 7 — Cancelamento determinístico (sem LLM)
+// =====================================================================
+
+describe('conversationService — cancelamento determinístico', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /** Monta um agendamento ativo com profissional embutido (formato do findMany com include). */
+  function fixAgendamento(overrides = {}) {
+    return {
+      id: 'ag-uuid-001',
+      clinicaId: CLINICA.id,
+      profissionalId: PROFISSIONAL.id,
+      pacienteId: PACIENTE.id,
+      dataHora: new Date('2026-06-10T13:00:00.000Z'),
+      duracaoMin: 30,
+      status: 'agendado',
+      calendarEventId: 'cal-event-001',
+      reminderJobId: null,
+      profissional: { nome: PROFISSIONAL.nome, especialidade: PROFISSIONAL.especialidade },
+      paciente: { nome: 'Karen' },
+      ...overrides,
+    };
+  }
+
+  it('inicio + "cancelar" + 0 agendamentos → mensagem de "não encontrei", sem chamar LLM', async () => {
+    setupPrismaMocks({ estadoAtual: 'inicio' });
+    prisma.agendamento.findMany.mockResolvedValue([]);
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'Olá, gostaria de cancelar uma consulta', CLINICA);
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(resposta).toContain('Não encontrei');
+    expect(resposta).toContain('cancelar');
+    expect(prisma.agendamento.update).not.toHaveBeenCalled();
+  });
+
+  it('inicio + "cancelar" + 1 agendamento → vai para cancelando_agendamento step=confirmando', async () => {
+    const ag = fixAgendamento();
+    setupPrismaMocks({ estadoAtual: 'inicio' });
+    prisma.agendamento.findMany.mockResolvedValue([ag]);
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'cancelar', CLINICA);
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(resposta).toContain('Confirma o cancelamento');
+    expect(resposta).toContain(PROFISSIONAL.nome);
+    expect(prisma.estadoConversa.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          estado: 'cancelando_agendamento',
+          contextoJson: expect.objectContaining({
+            cancelamento_step: 'confirmando',
+            agendamento_id: ag.id,
+          }),
+        }),
+      })
+    );
+  });
+
+  it('inicio + "3" do menu inicial → trata como cancelar (mesma rota)', async () => {
+    const ag = fixAgendamento();
+    setupPrismaMocks({ estadoAtual: 'inicio' });
+    prisma.agendamento.findMany.mockResolvedValue([ag]);
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, '3', CLINICA);
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(resposta).toContain('Confirma o cancelamento');
+  });
+
+  it('inicio + "cancelar" + N agendamentos → lista numerada e estado=selecionando', async () => {
+    const ag1 = fixAgendamento({ id: 'ag-1' });
+    const ag2 = fixAgendamento({ id: 'ag-2', dataHora: new Date('2026-06-15T15:00:00.000Z') });
+    setupPrismaMocks({ estadoAtual: 'inicio' });
+    prisma.agendamento.findMany.mockResolvedValue([ag1, ag2]);
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'quero cancelar uma consulta', CLINICA);
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(resposta).toContain('mais de uma consulta');
+    expect(resposta).toContain('1.');
+    expect(resposta).toContain('2.');
+    expect(prisma.estadoConversa.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          estado: 'cancelando_agendamento',
+          contextoJson: expect.objectContaining({
+            cancelamento_step: 'selecionando',
+            lista_ids: ['ag-1', 'ag-2'],
+          }),
+        }),
+      })
+    );
+  });
+
+  it('cancelando_agendamento step=selecionando + número válido → vai para confirmando', async () => {
+    const ag1 = fixAgendamento({ id: 'ag-1' });
+    const ag2 = fixAgendamento({ id: 'ag-2', dataHora: new Date('2026-06-15T15:00:00.000Z') });
+    setupPrismaMocks({
+      estadoAtual: 'cancelando_agendamento',
+      contextoJson: { cancelamento_step: 'selecionando', lista_ids: ['ag-1', 'ag-2'] },
+    });
+    prisma.agendamento.findMany.mockResolvedValue([ag1, ag2]);
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, '2', CLINICA);
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(resposta).toContain('Confirma o cancelamento');
+    expect(prisma.estadoConversa.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          estado: 'cancelando_agendamento',
+          contextoJson: expect.objectContaining({
+            cancelamento_step: 'confirmando',
+            agendamento_id: 'ag-2',
+          }),
+        }),
+      })
+    );
+  });
+
+  it('cancelando_agendamento step=selecionando + número inválido → re-pergunta sem mudar estado', async () => {
+    const ag1 = fixAgendamento({ id: 'ag-1' });
+    const ag2 = fixAgendamento({ id: 'ag-2' });
+    setupPrismaMocks({
+      estadoAtual: 'cancelando_agendamento',
+      contextoJson: { cancelamento_step: 'selecionando', lista_ids: ['ag-1', 'ag-2'] },
+    });
+    prisma.agendamento.findMany.mockResolvedValue([ag1, ag2]);
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, '5', CLINICA);
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(resposta).toContain('Não entendi');
+    expect(prisma.estadoConversa.update).not.toHaveBeenCalled();
+  });
+
+  it('cancelando_agendamento step=selecionando + "não" → volta para inicio sem cancelar', async () => {
+    const ag1 = fixAgendamento({ id: 'ag-1' });
+    const ag2 = fixAgendamento({ id: 'ag-2' });
+    setupPrismaMocks({
+      estadoAtual: 'cancelando_agendamento',
+      contextoJson: { cancelamento_step: 'selecionando', lista_ids: ['ag-1', 'ag-2'] },
+    });
+    prisma.agendamento.findMany.mockResolvedValue([ag1, ag2]);
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'não', CLINICA);
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(resposta).toContain('mantida');
+    expect(prisma.estadoConversa.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ estado: 'inicio', contextoJson: {} }),
+      })
+    );
+    expect(prisma.agendamento.update).not.toHaveBeenCalled();
+  });
+
+  it('cancelando_agendamento step=confirmando + "sim" → cancela no banco, remove evento, reseta estado', async () => {
+    const ag = fixAgendamento();
+    setupPrismaMocks({
+      estadoAtual: 'cancelando_agendamento',
+      contextoJson: { cancelamento_step: 'confirmando', agendamento_id: ag.id },
+    });
+    prisma.agendamento.findMany.mockResolvedValue([ag]);
+    prisma.agendamento.findFirst.mockResolvedValue(ag);
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'sim', CLINICA);
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(resposta).toContain('cancelada com sucesso');
+    expect(prisma.agendamento.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: ag.id },
+        data: { status: 'cancelado' },
+      })
+    );
+    expect(deleteEvent).toHaveBeenCalledWith(CLINICA.id, PROFISSIONAL.id, ag.calendarEventId);
+    expect(prisma.estadoConversa.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ estado: 'inicio', contextoJson: {} }),
+      })
+    );
+  });
+
+  it('cancelando_agendamento step=confirmando + "não" → não cancela e volta para inicio', async () => {
+    const ag = fixAgendamento();
+    setupPrismaMocks({
+      estadoAtual: 'cancelando_agendamento',
+      contextoJson: { cancelamento_step: 'confirmando', agendamento_id: ag.id },
+    });
+    prisma.agendamento.findMany.mockResolvedValue([ag]);
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'nao', CLINICA);
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(resposta).toContain('mantida');
+    expect(prisma.agendamento.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: 'cancelado' } })
+    );
+    expect(prisma.estadoConversa.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ estado: 'inicio' }),
+      })
+    );
+  });
+
+  it('cancelando_agendamento step=confirmando + texto ambíguo → re-pergunta sem mudar estado', async () => {
+    const ag = fixAgendamento();
+    setupPrismaMocks({
+      estadoAtual: 'cancelando_agendamento',
+      contextoJson: { cancelamento_step: 'confirmando', agendamento_id: ag.id },
+    });
+    prisma.agendamento.findMany.mockResolvedValue([ag]);
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'pode ser', CLINICA);
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(resposta).toContain('Não entendi');
+    expect(prisma.estadoConversa.update).not.toHaveBeenCalled();
+    expect(prisma.agendamento.update).not.toHaveBeenCalled();
+  });
+
+  it('cancelando_agendamento step=confirmando + "sim" mas agendamento não encontrado (ex: já cancelado em paralelo) → mensagem de erro e reseta estado', async () => {
+    const ag = fixAgendamento();
+    setupPrismaMocks({
+      estadoAtual: 'cancelando_agendamento',
+      contextoJson: { cancelamento_step: 'confirmando', agendamento_id: ag.id },
+    });
+    prisma.agendamento.findMany.mockResolvedValue([ag]);
+    prisma.agendamento.findFirst.mockResolvedValue(null);
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'sim', CLINICA);
+
+    expect(resposta).toContain('Não consegui localizar');
+    expect(prisma.agendamento.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: 'cancelado' } })
+    );
+    expect(prisma.estadoConversa.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ estado: 'inicio' }),
+      })
+    );
+  });
+
+  it('inicio + agendamento com status "agendado" (não confirmado pelo lembrete) → ainda assim aparece e pode ser cancelado', async () => {
+    // Bug histórico: o filtro era status='confirmado' apenas, então agendamentos recém-criados
+    // ficavam invisíveis. Após o fix, status agendado também conta como ativo.
+    const agAgendado = fixAgendamento({ status: 'agendado' });
+    setupPrismaMocks({ estadoAtual: 'inicio' });
+    prisma.agendamento.findMany.mockResolvedValue([agAgendado]);
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'cancelar', CLINICA);
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(resposta).toContain('Confirma o cancelamento');
+    // Verifica que o filtro de findMany usou o "in" com agendado e confirmado
+    expect(prisma.agendamento.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: { in: ['agendado', 'confirmado'] },
+        }),
+      })
+    );
+  });
+});

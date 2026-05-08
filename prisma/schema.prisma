@@ -160,6 +160,7 @@ enum EstadoBot {
   confirmando
   concluido
   aguardando_resposta_lembrete
+  cancelando_agendamento
 }
 
 enum TipoConsultaEnum {
