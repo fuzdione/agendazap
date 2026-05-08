@@ -394,6 +394,43 @@ describe('conversationService — handleIncomingMessage: remarcar_agendamento', 
     expect(resposta).not.toContain('Agendamento Confirmado');
   });
 
+  it('LLM pede nome redundante (acao=nenhuma) com agendamento_id e dados completos → força remarcar_agendamento', async () => {
+    // Cenário do user: paciente está em escolhendo_horario para remarcação,
+    // o contexto já tem nome_paciente (pré-preenchido pela interceptação).
+    // O paciente envia "sexta 16h", o LLM extrai data_hora mas pede o nome
+    // de novo (acao=nenhuma com texto "Para finalizar..."). Antes, a mensagem
+    // do LLM passava direto. Agora forçamos remarcar_agendamento e o
+    // handler sobrescreve com o card 🔄.
+    const ctxComNome = {
+      ...CONTEXTO_REMARCAR,
+      profissional_id: PROFISSIONAL.id,
+      nome_paciente: 'Lívia Gonçalves',
+    };
+    setupPrismaMocks({ estadoAtual: 'escolhendo_horario', contextoJson: ctxComNome });
+    processMessage.mockResolvedValueOnce({
+      mensagemParaPaciente: 'Para finalizar, essa consulta é para:\n• Lívia Gonçalves\n• Kátia Gonçalves\n\nOu está agendando para outra pessoa?',
+      controle: {
+        intencao: 'agendar',
+        novo_estado: 'escolhendo_horario',
+        dados_extraidos: { especialidade: null, profissional_id: null, tipo_consulta: null, convenio_nome: null, data_hora: null, nome_paciente: null, agendamento_id: null },
+        acao: 'nenhuma',
+        confianca: 0.7,
+      },
+    });
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'sexta 16h', CLINICA);
+
+    // Card determinístico veio em vez da pergunta redundante do LLM
+    expect(resposta).toContain('🔄');
+    expect(resposta).toContain('Consulta Remarcada');
+    expect(resposta).not.toContain('Para finalizar');
+    // E executou a remarcação no banco
+    expect(prisma.agendamento.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: 'cancelado' } })
+    );
+    expect(prisma.agendamento.create).toHaveBeenCalledOnce();
+  });
+
   it('confirmação de remarcação inclui Convênio quando tipo_consulta=convenio', async () => {
     const contextoConv = { ...CONTEXTO_REMARCAR, tipo_consulta: 'convenio', convenio_nome: 'Amil' };
     setupPrismaMocks({ estadoAtual: 'confirmando', contextoJson: contextoConv });

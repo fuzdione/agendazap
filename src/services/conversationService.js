@@ -1071,16 +1071,20 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
       : 'Não estou conseguindo entender sua solicitação. Entre em contato com nossa recepção pelo telefone da clínica. 🙏';
   }
 
-  // 8c. Normaliza a ação: se há sinal de remarcação e dados completos, força remarcar_agendamento
-  // Cobre dois casos:
-  //   (a) modelo retornou criar_agendamento mas agendamento_id está no contexto acumulado
-  //   (b) modelo declarou intencao=remarcar mas usou criar_agendamento por erro
+  // 8c. Normaliza a ação. Três casos:
+  //   (a) há agendamento_id no contexto + dados completos → sempre remarcar_agendamento
+  //       (cobre LLM retornando 'nenhuma' porque pediu nome redundante, ou criar_agendamento,
+  //       ou qualquer outra coisa — se temos os dados, o destino é remarcação)
+  //   (b) modelo retornou criar_agendamento sem agendamento_id mas com intencao=remarcar →
+  //       remarcar_agendamento (fallback por profissional)
+  //   (c) demais casos: mantém o que o LLM mandou
   let acaoEfetiva = controle.acao;
-  if (acaoEfetiva === 'criar_agendamento' && dadosAgendamentoCompletos(contextoAtualizado)) {
-    if (contextoAtualizado.agendamento_id) {
-      console.warn(`[controle] acao normalizada: criar_agendamento → remarcar_agendamento (agendamento_id=${contextoAtualizado.agendamento_id})`);
+  const dadosCompletos = dadosAgendamentoCompletos(contextoAtualizado, temConveniosNaClinica);
+  if (dadosCompletos && acaoEfetiva !== 'cancelar_agendamento') {
+    if (contextoAtualizado.agendamento_id && acaoEfetiva !== 'remarcar_agendamento') {
+      console.warn(`[controle] acao normalizada: ${acaoEfetiva} → remarcar_agendamento (agendamento_id=${contextoAtualizado.agendamento_id} + dados completos)`);
       acaoEfetiva = 'remarcar_agendamento';
-    } else if (controle.intencao === 'remarcar') {
+    } else if (!contextoAtualizado.agendamento_id && acaoEfetiva === 'criar_agendamento' && controle.intencao === 'remarcar') {
       console.warn(`[controle] acao normalizada: criar_agendamento → remarcar_agendamento (intencao=remarcar, sem agendamento_id — usará fallback)`);
       acaoEfetiva = 'remarcar_agendamento';
     }
