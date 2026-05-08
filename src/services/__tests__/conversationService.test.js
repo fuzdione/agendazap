@@ -1300,3 +1300,200 @@ describe('conversationService — cancelamento determinístico', () => {
     );
   });
 });
+
+// =====================================================================
+// TESTE 8 — Remarcação determinística (seleção de agendamento sem LLM)
+// =====================================================================
+
+describe('conversationService — remarcação determinística', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /** Agendamento com profissional e paciente prontos para remarcação. */
+  function fixAgendamento(overrides = {}) {
+    return {
+      id: 'ag-uuid-001',
+      clinicaId: CLINICA.id,
+      profissionalId: PROFISSIONAL.id,
+      pacienteId: PACIENTE.id,
+      dataHora: new Date('2026-06-10T13:00:00.000Z'),
+      duracaoMin: 30,
+      status: 'agendado',
+      tipoConsulta: 'particular',
+      convenioId: null,
+      calendarEventId: 'cal-event-001',
+      reminderJobId: null,
+      profissional: { nome: PROFISSIONAL.nome, especialidade: PROFISSIONAL.especialidade },
+      paciente: { nome: 'Karen' },
+      convenio: null,
+      ...overrides,
+    };
+  }
+
+  it('inicio + "remarcar" + 0 agendamentos → mensagem "não encontrei", sem chamar LLM', async () => {
+    setupPrismaMocks({ estadoAtual: 'inicio' });
+    prisma.agendamento.findMany.mockResolvedValue([]);
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'gostaria de remarcar uma consulta', CLINICA);
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(resposta).toContain('Não encontrei');
+    expect(resposta).toContain('remarcar');
+    expect(prisma.agendamento.update).not.toHaveBeenCalled();
+  });
+
+  it('inicio + "remarcar" + 1 agendamento → vai para escolhendo_horario com contexto pré-preenchido + slots', async () => {
+    const ag = fixAgendamento();
+    setupPrismaMocks({ estadoAtual: 'inicio' });
+    prisma.agendamento.findMany.mockResolvedValue([ag]);
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'remarcar', CLINICA);
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(resposta).toContain('Vamos remarcar');
+    expect(resposta).toContain(PROFISSIONAL.nome);
+    expect(resposta).toContain('horários disponíveis');
+    expect(prisma.estadoConversa.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          estado: 'escolhendo_horario',
+          contextoJson: expect.objectContaining({
+            agendamento_id: ag.id,
+            profissional_id: ag.profissionalId,
+            nome_paciente: 'Karen',
+            tipo_consulta: 'particular',
+            intencao_remarcar: true,
+          }),
+        }),
+      })
+    );
+  });
+
+  it('inicio + "2" do menu inicial → trata como remarcar', async () => {
+    const ag = fixAgendamento();
+    setupPrismaMocks({ estadoAtual: 'inicio' });
+    prisma.agendamento.findMany.mockResolvedValue([ag]);
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, '2', CLINICA);
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(resposta).toContain('Vamos remarcar');
+  });
+
+  it('inicio + "remarcar" + N agendamentos → lista numerada e estado=remarcando_agendamento', async () => {
+    const ag1 = fixAgendamento({ id: 'ag-1', paciente: { nome: 'Kátia' } });
+    const ag2 = fixAgendamento({
+      id: 'ag-2',
+      dataHora: new Date('2026-06-15T15:00:00.000Z'),
+      paciente: { nome: 'João' },
+    });
+    setupPrismaMocks({ estadoAtual: 'inicio' });
+    prisma.agendamento.findMany.mockResolvedValue([ag1, ag2]);
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'quero remarcar', CLINICA);
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(resposta).toContain('mais de uma consulta');
+    expect(resposta).toContain('Kátia');
+    expect(resposta).toContain('João');
+    expect(prisma.estadoConversa.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          estado: 'remarcando_agendamento',
+          contextoJson: expect.objectContaining({
+            remarcacao_step: 'selecionando',
+            lista_ids: ['ag-1', 'ag-2'],
+          }),
+        }),
+      })
+    );
+  });
+
+  it('remarcando_agendamento step=selecionando + número válido → vai para escolhendo_horario com contexto correto', async () => {
+    const ag1 = fixAgendamento({ id: 'ag-1' });
+    const ag2 = fixAgendamento({
+      id: 'ag-2',
+      dataHora: new Date('2026-06-15T15:00:00.000Z'),
+      paciente: { nome: 'João' },
+    });
+    setupPrismaMocks({
+      estadoAtual: 'remarcando_agendamento',
+      contextoJson: { remarcacao_step: 'selecionando', lista_ids: ['ag-1', 'ag-2'] },
+    });
+    prisma.agendamento.findMany.mockResolvedValue([ag1, ag2]);
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, '2', CLINICA);
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(resposta).toContain('Vamos remarcar');
+    expect(prisma.estadoConversa.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          estado: 'escolhendo_horario',
+          contextoJson: expect.objectContaining({
+            agendamento_id: 'ag-2',
+            nome_paciente: 'João',
+          }),
+        }),
+      })
+    );
+  });
+
+  it('remarcando_agendamento step=selecionando + número inválido → re-pergunta sem mudar estado', async () => {
+    const ag1 = fixAgendamento({ id: 'ag-1' });
+    setupPrismaMocks({
+      estadoAtual: 'remarcando_agendamento',
+      contextoJson: { remarcacao_step: 'selecionando', lista_ids: ['ag-1'] },
+    });
+    prisma.agendamento.findMany.mockResolvedValue([ag1]);
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, '5', CLINICA);
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(resposta).toContain('Não entendi');
+    expect(prisma.estadoConversa.update).not.toHaveBeenCalled();
+  });
+
+  it('remarcando_agendamento step=selecionando + "não" → volta para inicio', async () => {
+    const ag1 = fixAgendamento({ id: 'ag-1' });
+    setupPrismaMocks({
+      estadoAtual: 'remarcando_agendamento',
+      contextoJson: { remarcacao_step: 'selecionando', lista_ids: ['ag-1'] },
+    });
+    prisma.agendamento.findMany.mockResolvedValue([ag1]);
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'não', CLINICA);
+
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(resposta).toContain('mantida');
+    expect(prisma.estadoConversa.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ estado: 'inicio', contextoJson: {} }),
+      })
+    );
+  });
+
+  it('inicio + "remarcar" + 1 agendamento de convênio → preserva tipo_consulta e convenio_nome no contexto', async () => {
+    const ag = fixAgendamento({
+      tipoConsulta: 'convenio',
+      convenioId: 'conv-amil',
+      convenio: { nome: 'Amil' },
+    });
+    setupPrismaMocks({ estadoAtual: 'inicio' });
+    prisma.agendamento.findMany.mockResolvedValue([ag]);
+
+    await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'remarcar', CLINICA);
+
+    expect(prisma.estadoConversa.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          contextoJson: expect.objectContaining({
+            tipo_consulta: 'convenio',
+            convenio_nome: 'Amil',
+          }),
+        }),
+      })
+    );
+  });
+});

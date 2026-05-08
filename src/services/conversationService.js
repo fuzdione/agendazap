@@ -91,6 +91,25 @@ function detectarIntencaoCancelar(msg) {
 }
 
 /**
+ * Detecta intenção de remarcar a partir da mensagem do paciente no estado "inicio".
+ * Aceita: "2", "2️⃣", "remarcar", "remarcação", "remarca", "quero remarcar",
+ * "trocar", "alterar", "mudar consulta", etc.
+ * @param {string} msg
+ * @returns {boolean}
+ */
+function detectarIntencaoRemarcar(msg) {
+  const trimmed = String(msg ?? '').trim();
+  if (trimmed === '2' || trimmed === '2️⃣') return true;
+  const n = normalizar(msg);
+  if (!n) return false;
+  // "remarcar/remarca/remarcação" — palavra-chave principal
+  if (/\bremarc\w*/.test(n)) return true;
+  // Sinônimos comuns aplicados a "consulta": "trocar consulta", "mudar consulta", "alterar consulta"
+  if (/\b(trocar|mudar|alterar)\s+\w*\s*consulta/.test(n)) return true;
+  return false;
+}
+
+/**
  * Resposta de confirmação do paciente — sim/não ao cancelamento.
  * @returns {'sim'|'nao'|null}
  */
@@ -117,6 +136,39 @@ function formatarAgendamentoBreve(ag) {
   const nomePaciente = ag.paciente?.nome;
   const prefixoPaciente = nomePaciente ? `*${nomePaciente}* — ` : '';
   return `${prefixoPaciente}${ag.profissional.nome} (${ag.profissional.especialidade}) — ${dt}`;
+}
+
+/**
+ * Inicia a etapa de escolha de novo horário para uma remarcação. Carrega o contexto
+ * a partir do agendamento existente (paciente, profissional, tipo, convênio),
+ * transita para `escolhendo_horario` e devolve a mensagem com slots prontos.
+ *
+ * O LLM continua o fluxo a partir daqui (escolha do slot, confirmação) e dispara
+ * a ação `remarcar_agendamento` quando o paciente confirmar.
+ */
+async function iniciarRemarcacaoComSlots(clinicaId, telefone, agendamento, profissional) {
+  const novoContexto = {
+    agendamento_id: agendamento.id,
+    profissional_id: agendamento.profissionalId,
+    nome_paciente: agendamento.paciente?.nome ?? null,
+    tipo_consulta: agendamento.tipoConsulta ?? 'particular',
+    convenio_nome: agendamento.convenio?.nome ?? null,
+    intencao_remarcar: true,
+  };
+
+  await prisma.estadoConversa.update({
+    where: { telefone_clinicaId: { telefone, clinicaId } },
+    data: { estado: 'escolhendo_horario', contextoJson: novoContexto },
+  });
+
+  const agora = new Date();
+  const dataFim = new Date(agora.getTime() + JANELA_SLOTS_DIAS * 24 * 60 * 60 * 1000);
+  const slots = await getCalendarSlots(clinicaId, agendamento.profissionalId, agora, dataFim);
+  const slotsMsg = formatarSlotsParaMensagem([{ profissional, slots }], agendamento.profissionalId);
+
+  return `Vamos remarcar sua consulta:\n\n${formatarAgendamentoBreve(agendamento)}\n\n` +
+    `Estes são os horários disponíveis com ${profissional.nome}:\n\n${slotsMsg}\n\n` +
+    `Por favor, escolha o novo horário. 📅`;
 }
 
 /**
@@ -573,6 +625,7 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
     include: {
       profissional: { select: { nome: true, especialidade: true } },
       paciente: { select: { nome: true } },
+      convenio: { select: { nome: true } },
     },
     orderBy: { dataHora: 'asc' },
   });
@@ -799,6 +852,103 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
 
       // Não entendeu sim/não — re-pergunta sem mudar de estado
       return 'Não entendi. Por favor, responda *sim* para cancelar a consulta ou *não* para mantê-la. 🙏';
+    }
+
+    // Estado inválido — reseta e cai no LLM
+    await prisma.estadoConversa.update({
+      where: { telefone_clinicaId: { telefone, clinicaId } },
+      data: { estado: 'inicio', contextoJson: {} },
+    });
+  }
+
+  // 4e. Interceptação determinística da remarcação.
+  // Espelha o padrão do cancelamento, mas só a *seleção do agendamento* é determinística.
+  // A escolha do novo horário continua no fluxo escolhendo_horario (LLM-driven), porque
+  // depende de interpretar linguagem natural ("amanhã 10h", "sexta às 14"). O contexto é
+  // pré-preenchido com agendamento_id/profissional_id/tipo/convênio/paciente para que o
+  // LLM dispare remarcar_agendamento ao final, e nunca crie um novo agendamento.
+  if (estadoConversa.estado === 'inicio' && detectarIntencaoRemarcar(mensagemTexto)) {
+    if (agendamentosAtivos.length === 0) {
+      await prisma.estadoConversa.update({
+        where: { telefone_clinicaId: { telefone, clinicaId } },
+        data: { estado: 'inicio', contextoJson: {} },
+      });
+      return 'Não encontrei nenhuma consulta agendada neste número para remarcar. ' +
+        'Se você acredita que existe uma consulta, entre em contato com a recepção. 🙏';
+    }
+
+    if (agendamentosAtivos.length === 1) {
+      const ag = agendamentosAtivos[0];
+      const profissionalDoAg = profissionais.find((p) => p.id === ag.profissionalId);
+      if (!profissionalDoAg) {
+        // Profissional inativo ou sumiu — sem caminho deterministico, deixa cair no LLM
+        return 'Não consegui localizar o profissional desta consulta. ' +
+          'Por favor, entre em contato com a recepção. 🙏';
+      }
+      return await iniciarRemarcacaoComSlots(clinicaId, telefone, ag, profissionalDoAg);
+    }
+
+    // >1 agendamentos: lista numerada
+    const lista = agendamentosAtivos
+      .map((ag, i) => `${numItem(i)} ${formatarAgendamentoBreve(ag)}`)
+      .join('\n');
+    await prisma.estadoConversa.update({
+      where: { telefone_clinicaId: { telefone, clinicaId } },
+      data: {
+        estado: 'remarcando_agendamento',
+        contextoJson: {
+          remarcacao_step: 'selecionando',
+          lista_ids: agendamentosAtivos.map((ag) => ag.id),
+        },
+      },
+    });
+    return `Você tem mais de uma consulta agendada. Qual deseja remarcar? Digite o número:\n\n${lista}`;
+  }
+
+  if (estadoConversa.estado === 'remarcando_agendamento') {
+    const ctx = estadoConversa.contextoJson ?? {};
+
+    // Etapa de seleção: paciente escolheu o número da lista
+    if (ctx.remarcacao_step === 'selecionando' && Array.isArray(ctx.lista_ids)) {
+      const trimmed = String(mensagemTexto ?? '').trim();
+      const idx = parseInt(trimmed, 10) - 1;
+      if (Number.isInteger(idx) && idx >= 0 && idx < ctx.lista_ids.length) {
+        const idEscolhido = ctx.lista_ids[idx];
+        const agEscolhido = agendamentosAtivos.find((ag) => ag.id === idEscolhido);
+        if (!agEscolhido) {
+          await prisma.estadoConversa.update({
+            where: { telefone_clinicaId: { telefone, clinicaId } },
+            data: { estado: 'inicio', contextoJson: {} },
+          });
+          return 'A consulta selecionada não está mais disponível. Tente novamente, por favor. 🙏';
+        }
+        const profissionalDoAg = profissionais.find((p) => p.id === agEscolhido.profissionalId);
+        if (!profissionalDoAg) {
+          await prisma.estadoConversa.update({
+            where: { telefone_clinicaId: { telefone, clinicaId } },
+            data: { estado: 'inicio', contextoJson: {} },
+          });
+          return 'Não consegui localizar o profissional desta consulta. ' +
+            'Por favor, entre em contato com a recepção. 🙏';
+        }
+        return await iniciarRemarcacaoComSlots(clinicaId, telefone, agEscolhido, profissionalDoAg);
+      }
+
+      // Permite o paciente desistir
+      const desistencia = parseRespostaSimNao(mensagemTexto);
+      if (desistencia === 'nao') {
+        await prisma.estadoConversa.update({
+          where: { telefone_clinicaId: { telefone, clinicaId } },
+          data: { estado: 'inicio', contextoJson: {} },
+        });
+        return 'Tudo bem, sua consulta foi mantida. Posso ajudar com mais alguma coisa? 😊';
+      }
+
+      // Não bateu — re-pergunta com a mesma lista
+      const lista = agendamentosAtivos
+        .map((ag, i) => `${numItem(i)} ${formatarAgendamentoBreve(ag)}`)
+        .join('\n');
+      return `Não entendi. Digite o número da consulta que deseja remarcar:\n\n${lista}`;
     }
 
     // Estado inválido — reseta e cai no LLM
