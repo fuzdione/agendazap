@@ -138,6 +138,38 @@ function formatarAgendamentoBreve(ag) {
   return `${prefixoPaciente}${ag.profissional.nome} (${ag.profissional.especialidade}) — ${dt}`;
 }
 
+/** Formata data/hora longa em pt-BR (ex: "sexta-feira, 08/05/2026 às 14:00"). */
+function formatarDataHoraLonga(dataHora) {
+  const dt = new Date(dataHora);
+  const dataParte = dt.toLocaleString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric',
+  });
+  const horaParte = dt.toLocaleString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    hour: '2-digit', minute: '2-digit',
+  });
+  return `${dataParte} às ${horaParte}`;
+}
+
+/**
+ * Card determinístico de confirmação de remarcação. Inclui antes/depois
+ * para o paciente confirmar visualmente que a consulta certa foi movida.
+ */
+function formatarConfirmacaoRemarcacao({ profissional, dataHoraAntiga, dataHoraNova, tipoConsulta, convenioNome, nomePaciente }) {
+  const linhaTipo = tipoConsulta === 'convenio' && convenioNome
+    ? `*Convênio:* ${convenioNome}`
+    : '*Tipo:* Particular';
+  const linhaAntes = dataHoraAntiga ? `*Antes:* ${formatarDataHoraLonga(dataHoraAntiga)}\n` : '';
+
+  return `🔄 *Consulta Remarcada!*\n\n` +
+    `*Médico:* ${profissional.nome} — ${profissional.especialidade}\n` +
+    linhaAntes +
+    `*Agora:* ${formatarDataHoraLonga(dataHoraNova)}\n` +
+    `${linhaTipo}\n` +
+    `*Paciente:* ${nomePaciente ?? 'Paciente'}`;
+}
+
 /**
  * Inicia a etapa de escolha de novo horário para uma remarcação. Carrega o contexto
  * a partir do agendamento existente (paciente, profissional, tipo, convênio),
@@ -1311,7 +1343,18 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
       }
 
       console.log(`[remarcar_agendamento] concluída com sucesso para ${telefone}`);
-      // respostaFinal mantém mensagemParaPaciente (confirmação do Claude)
+
+      // Sobrescreve a confirmação do LLM com um card determinístico — o LLM tende
+      // a usar "✅ Agendamento Confirmado!" (idêntico ao card de novo agendamento),
+      // o que confunde o paciente. Aqui mostramos antes/depois e o título 🔄.
+      respostaFinal = formatarConfirmacaoRemarcacao({
+        profissional,
+        dataHoraAntiga: agendamentoAntigo?.dataHora ?? null,
+        dataHoraNova: contextoAtualizado.data_hora,
+        tipoConsulta: contextoAtualizado.tipo_consulta,
+        convenioNome: contextoAtualizado.convenio_nome,
+        nomePaciente: contextoAtualizado.nome_paciente,
+      });
     } else {
       // Sobreescreve a mensagem do Claude — não envia "remarcado" se o backend falhou
       respostaFinal =

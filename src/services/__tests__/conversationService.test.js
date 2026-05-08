@@ -367,7 +367,7 @@ describe('conversationService — handleIncomingMessage: remarcar_agendamento', 
       },
     });
 
-    await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'Quero remarcar para sexta às 9h', CLINICA);
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'Quero remarcar para sexta às 9h', CLINICA);
 
     // Agendamento antigo marcado como cancelado
     expect(prisma.agendamento.update).toHaveBeenCalledWith(
@@ -386,6 +386,32 @@ describe('conversationService — handleIncomingMessage: remarcar_agendamento', 
         data: expect.objectContaining({ estado: 'inicio', contextoJson: {} }),
       })
     );
+    // Card determinístico de remarcação substitui a mensagem do LLM
+    expect(resposta).toContain('🔄');
+    expect(resposta).toContain('Consulta Remarcada');
+    expect(resposta).toContain('Antes:');
+    expect(resposta).toContain('Agora:');
+    expect(resposta).not.toContain('Agendamento Confirmado');
+  });
+
+  it('confirmação de remarcação inclui Convênio quando tipo_consulta=convenio', async () => {
+    const contextoConv = { ...CONTEXTO_REMARCAR, tipo_consulta: 'convenio', convenio_nome: 'Amil' };
+    setupPrismaMocks({ estadoAtual: 'confirmando', contextoJson: contextoConv });
+    processMessage.mockResolvedValueOnce({
+      mensagemParaPaciente: 'ok',
+      controle: {
+        intencao: 'remarcar',
+        novo_estado: 'concluido',
+        dados_extraidos: { especialidade: null, profissional_id: null, data_hora: null, nome_paciente: null },
+        acao: 'remarcar_agendamento',
+        confianca: 0.95,
+      },
+    });
+
+    const resposta = await handleIncomingMessage(CLINICA.id, PACIENTE.telefone, 'sim', CLINICA);
+
+    expect(resposta).toContain('Convênio:* Amil');
+    expect(resposta).not.toContain('Tipo:* Particular');
   });
 
   it('usa fallback por profissional quando sem agendamento_id → cancela e cria', async () => {
