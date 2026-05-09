@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../services/api.js';
 import { format, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Filter, Search, X, RotateCcw } from 'lucide-react';
+import { Filter, Search, X, RotateCcw, ChevronDown } from 'lucide-react';
 
 /** Formata Date como YYYY-MM-DD para os inputs date e a query do backend. */
 function isoDateLocal(date) {
@@ -15,9 +15,12 @@ function isoDateLocal(date) {
  * - "proximos": de hoje em diante, ordem ascendente (próxima consulta no topo)
  * - "hoje": apenas o dia corrente, ascendente
  * - "semana": hoje + próximos 7 dias, ascendente
- * - "historico": antes de hoje, descendente (mais recente primeiro)
- * - "todos": sem filtro de data, descendente
+ * - "historico": últimos 90 dias até ontem, descendente (mais recente primeiro).
+ *   Janela limitada para evitar varredura completa da tabela conforme o histórico
+ *   da clínica cresce; usuário pode ampliar manualmente nos campos de data.
  */
+const HISTORICO_DIAS = 90;
+
 function presetPorTab(tab) {
   const hoje = new Date();
   switch (tab) {
@@ -26,9 +29,11 @@ function presetPorTab(tab) {
     case 'semana':
       return { data_inicio: isoDateLocal(hoje), data_fim: isoDateLocal(addDays(hoje, 7)), ordem: 'asc' };
     case 'historico':
-      return { data_inicio: '', data_fim: isoDateLocal(addDays(hoje, -1)), ordem: 'desc' };
-    case 'todos':
-      return { data_inicio: '', data_fim: '', ordem: 'desc' };
+      return {
+        data_inicio: isoDateLocal(addDays(hoje, -HISTORICO_DIAS)),
+        data_fim: isoDateLocal(addDays(hoje, -1)),
+        ordem: 'desc',
+      };
     case 'proximos':
     default:
       return { data_inicio: isoDateLocal(hoje), data_fim: '', ordem: 'asc' };
@@ -40,7 +45,6 @@ const TABS = [
   { value: 'hoje',      label: 'Hoje' },
   { value: 'semana',    label: 'Esta semana' },
   { value: 'historico', label: 'Histórico' },
-  { value: 'todos',     label: 'Todos' },
 ];
 
 const STATUS_CONFIG = {
@@ -96,6 +100,11 @@ export default function Agendamentos() {
   // Input de busca com debounce — 400ms após o usuário parar de digitar,
   // o termo é propagado para `filtros.busca` e a query é refeita.
   const [buscaInput, setBuscaInput] = useState('');
+
+  // No mobile o card de filtros fica colapsado por padrão pra não empurrar a
+  // lista de resultados pra fora do viewport enquanto o usuário digita na busca.
+  // No desktop (md+) o conteúdo é sempre exibido via classe `md:grid`.
+  const [filtrosAbertos, setFiltrosAbertos] = useState(false);
 
   useEffect(() => {
     if (buscaInput === filtros.busca) return;
@@ -183,6 +192,14 @@ export default function Agendamentos() {
   // Detecta se há filtros não-default ativos (para mostrar/esconder o botão limpar)
   const temFiltroAtivo = !!(filtros.profissional_id || filtros.status || filtros.busca);
 
+  // Contagem dos filtros aplicados *no card de filtros* (não inclui a busca,
+  // que é um campo separado acima). Usada no badge ao lado de "Filtros" no
+  // mobile para sinalizar que há filtros ativos mesmo com o card colapsado.
+  const filtrosAtivosCount =
+    (filtros.profissional_id ? 1 : 0) +
+    (filtros.status ? 1 : 0) +
+    (tabAtiva === null ? 1 : 0);
+
   return (
     <div className="space-y-5">
       <h1 className="text-2xl font-bold text-gray-900">Agendamentos</h1>
@@ -229,9 +246,26 @@ export default function Agendamentos() {
 
       {/* Filtros */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-        <div className="flex items-center gap-2 mb-3 flex-wrap">
-          <Filter size={16} className="text-gray-400" />
-          <span className="text-sm font-medium text-gray-600">Filtros</span>
+        <div className={`flex items-center gap-2 flex-wrap ${filtrosAbertos ? 'mb-3' : 'mb-0 md:mb-3'}`}>
+          <button
+            type="button"
+            onClick={() => setFiltrosAbertos((v) => !v)}
+            className="flex items-center gap-2 md:pointer-events-none md:cursor-default"
+            aria-expanded={filtrosAbertos}
+            aria-controls="filtros-conteudo"
+          >
+            <Filter size={16} className="text-gray-400" />
+            <span className="text-sm font-medium text-gray-600">Filtros</span>
+            {filtrosAtivosCount > 0 && (
+              <span className="bg-emerald-100 text-emerald-700 text-xs font-semibold px-1.5 py-0.5 rounded-full">
+                {filtrosAtivosCount}
+              </span>
+            )}
+            <ChevronDown
+              size={16}
+              className={`text-gray-400 transition-transform md:hidden ${filtrosAbertos ? 'rotate-180' : ''}`}
+            />
+          </button>
           {tabAtiva === null && (
             <span className="text-xs text-gray-400 hidden sm:inline">(filtros customizados — clique numa tab para resetar)</span>
           )}
@@ -246,7 +280,10 @@ export default function Agendamentos() {
             </button>
           )}
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div
+          id="filtros-conteudo"
+          className={`${filtrosAbertos ? 'grid' : 'hidden'} md:grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3`}
+        >
           <div>
             <label className="block text-xs text-gray-500 mb-1">Data início</label>
             <input
