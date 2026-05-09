@@ -175,6 +175,24 @@ PROIBIDO ao perguntar o nome do paciente: NÃO repita a lista de horários (linh
   const mensagemBoasVindas = clinica.configJson?.mensagem_boas_vindas;
   const telefoneFallback = clinica.configJson?.telefone_fallback;
 
+  // Saudação baseada no horário de Brasília — usada apenas no fallback abaixo,
+  // quando a clínica não configurou (ou apagou) a mensagem personalizada.
+  const horaBrasilia = Number(
+    new Date().toLocaleString('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      hour: '2-digit', hour12: false,
+    })
+  );
+  const saudacaoHorario =
+    horaBrasilia >= 5 && horaBrasilia < 12 ? 'Bom dia' :
+    horaBrasilia >= 12 && horaBrasilia < 18 ? 'Boa tarde' : 'Boa noite';
+
+  // Fallback aciona tanto para undefined quanto para string vazia/whitespace.
+  // Se usar `??` sozinho, apagar o campo no painel salva "" e o LLM recebe um
+  // template em branco — saudação some e a mensagem fica truncada no menu.
+  const mensagemBoasVindasResolvida = mensagemBoasVindas?.trim()
+    || `${saudacaoHorario}! Você está falando com o atendimento virtual da ${clinica.nome}. 😊`;
+
   return `Você é o assistente virtual da ${clinica.nome}, uma clínica localizada em ${clinica.endereco ?? 'endereço não informado'}.
 Seu papel é ajudar pacientes a agendar, remarcar ou cancelar consultas pelo WhatsApp de forma cordial, objetiva e eficiente.
 ${telefoneFallback ? `\nQuando sugerir que o paciente fale com a recepção, informe sempre este número: ${telefoneFallback}\n` : ''}
@@ -221,7 +239,7 @@ ${contextoFormatado}
 Caso 1 — Mensagem vaga / saudação (ex: "oi", "olá", "bom dia", "boa tarde"):
 Use EXATAMENTE este formato:
 
-${mensagemBoasVindas ?? `[saudação adequada ao horário]! Bem-vindo(a) à ${clinica.nome}! 😊`}
+${mensagemBoasVindasResolvida}
 
 Como posso ajudá-lo(a) hoje?
 
