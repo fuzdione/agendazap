@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../services/api.js';
-import { Plus, Pencil, Trash2, Link, X } from 'lucide-react';
+import { Plus, Pencil, Trash2, Link, X, IdCard } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 
 const INICIAL = { nome: '', especialidade: '', duracaoConsultaMin: 30, atendeParticular: true, ativo: true };
@@ -210,9 +210,9 @@ export default function Profissionais() {
                       <button
                         onClick={() => abrirModalConvenios(p)}
                         title="Gerenciar convênios"
-                        className="px-2 py-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors text-xs font-medium"
+                        className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
                       >
-                        Conv.
+                        <IdCard size={16} />
                       </button>
                     )}
                     <button
