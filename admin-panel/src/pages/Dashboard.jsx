@@ -356,62 +356,118 @@ export default function Dashboard() {
             {filtroPeriodo === '7dias'  && 'Nenhuma consulta nos próximos 7 dias.'}
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs text-gray-500 border-b border-gray-100">
-                  <th className="px-5 py-3 font-medium">Data / Hora</th>
-                  <th className="px-5 py-3 font-medium">Paciente</th>
-                  <th className="px-5 py-3 font-medium">Profissional</th>
-                  <th className="px-5 py-3 font-medium">Status</th>
-                  <th className="px-5 py-3 font-medium">Ações</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {proximosFiltrados.map((ag) => {
-                  const st = STATUS_LABEL[ag.status] ?? { label: ag.status, cls: 'bg-gray-100 text-gray-700' };
-                  return (
-                    <tr key={ag.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-5 py-3 whitespace-nowrap">
-                        {format(new Date(ag.dataHora), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-                      </td>
-                      <td className="px-5 py-3">
-                        <p className="font-medium text-gray-800">{ag.paciente?.nome ?? '—'}</p>
-                        <p className="text-xs text-gray-400">{ag.paciente?.telefone}</p>
-                      </td>
-                      <td className="px-5 py-3">
-                        <p>{ag.profissional?.nome}</p>
-                        <p className="text-xs text-gray-400">{ag.profissional?.especialidade}</p>
-                      </td>
-                      <td className="px-5 py-3">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${st.cls}`}>
-                          {st.label}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3">
-                        <div className="flex gap-2">
-                          <button
-                            disabled={atualizando[ag.id] || ag.status === 'concluido'}
-                            onClick={() => atualizarStatus(ag.id, 'concluido')}
-                            className="px-2 py-1 text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-40 rounded transition-colors"
-                          >
-                            Concluir
-                          </button>
-                          <button
-                            disabled={atualizando[ag.id] || ag.status === 'cancelado'}
-                            onClick={() => atualizarStatus(ag.id, 'cancelado')}
-                            className="px-2 py-1 text-xs bg-red-50 text-red-700 hover:bg-red-100 disabled:opacity-40 rounded transition-colors"
-                          >
-                            Cancelar
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <>
+            {/* Mobile: cards (< md) */}
+            <div className="md:hidden divide-y divide-gray-100">
+              {proximosFiltrados.map((ag) => {
+                const st = STATUS_LABEL[ag.status] ?? { label: ag.status, cls: 'bg-gray-100 text-gray-700' };
+                return (
+                  <div key={ag.id} className="p-4">
+                    {/* Linha 1: data + status */}
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <p className="text-sm font-semibold text-gray-800">
+                        {format(new Date(ag.dataHora), "dd/MM/yy 'às' HH:mm", { locale: ptBR })}
+                      </p>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${st.cls}`}>
+                        {st.label}
+                      </span>
+                    </div>
+
+                    {/* Paciente */}
+                    <p className="text-sm font-medium text-gray-900">{ag.paciente?.nome ?? '—'}</p>
+                    <p className="text-xs text-gray-400 mb-2">{ag.paciente?.telefone}</p>
+
+                    {/* Profissional */}
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-600">
+                      <span className="font-medium">{ag.profissional?.nome}</span>
+                      {ag.profissional?.especialidade && (
+                        <>
+                          <span className="text-gray-400">·</span>
+                          <span>{ag.profissional?.especialidade}</span>
+                        </>
+                      )}
+                    </div>
+
+                    {/* Ações */}
+                    <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-gray-100">
+                      <button
+                        disabled={atualizando[ag.id] || ag.status === 'concluido'}
+                        onClick={() => atualizarStatus(ag.id, 'concluido')}
+                        className="px-3 py-1.5 text-xs font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-40 rounded transition-colors"
+                      >
+                        Concluir
+                      </button>
+                      <button
+                        disabled={atualizando[ag.id] || ag.status === 'cancelado'}
+                        onClick={() => atualizarStatus(ag.id, 'cancelado')}
+                        className="px-3 py-1.5 text-xs font-medium bg-red-50 text-red-700 hover:bg-red-100 disabled:opacity-40 rounded transition-colors"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Desktop: tabela (md+) */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-gray-500 border-b border-gray-100">
+                    <th className="px-5 py-3 font-medium">Data / Hora</th>
+                    <th className="px-5 py-3 font-medium">Paciente</th>
+                    <th className="px-5 py-3 font-medium">Profissional</th>
+                    <th className="px-5 py-3 font-medium">Status</th>
+                    <th className="px-5 py-3 font-medium">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {proximosFiltrados.map((ag) => {
+                    const st = STATUS_LABEL[ag.status] ?? { label: ag.status, cls: 'bg-gray-100 text-gray-700' };
+                    return (
+                      <tr key={ag.id} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-5 py-3 whitespace-nowrap">
+                          {format(new Date(ag.dataHora), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                        </td>
+                        <td className="px-5 py-3">
+                          <p className="font-medium text-gray-800">{ag.paciente?.nome ?? '—'}</p>
+                          <p className="text-xs text-gray-400">{ag.paciente?.telefone}</p>
+                        </td>
+                        <td className="px-5 py-3">
+                          <p>{ag.profissional?.nome}</p>
+                          <p className="text-xs text-gray-400">{ag.profissional?.especialidade}</p>
+                        </td>
+                        <td className="px-5 py-3">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${st.cls}`}>
+                            {st.label}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3">
+                          <div className="flex gap-2">
+                            <button
+                              disabled={atualizando[ag.id] || ag.status === 'concluido'}
+                              onClick={() => atualizarStatus(ag.id, 'concluido')}
+                              className="px-2 py-1 text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-40 rounded transition-colors"
+                            >
+                              Concluir
+                            </button>
+                            <button
+                              disabled={atualizando[ag.id] || ag.status === 'cancelado'}
+                              onClick={() => atualizarStatus(ag.id, 'cancelado')}
+                              className="px-2 py-1 text-xs bg-red-50 text-red-700 hover:bg-red-100 disabled:opacity-40 rounded transition-colors"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
     </div>
