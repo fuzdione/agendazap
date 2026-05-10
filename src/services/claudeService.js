@@ -123,7 +123,7 @@ export function buildSystemPrompt(clinica, profissionais, horariosDisponiveis, e
         const primeiros = d.slots.slice(0, MAX_SLOTS_POR_DIA);
         const extra = d.slots.length - primeiros.length;
         const linhaSlots = primeiros.join(' | ') + (extra > 0 ? ` (+${extra} horários)` : '');
-        return `📅 *${d.dia_semana}, ${dataFormatada}:*\n${linhaSlots}`;
+        return `*${d.dia_semana}, ${dataFormatada}:*\n${linhaSlots}`;
       }).join('\n\n');
 
       return `${profissional.nome} (${profissional.especialidade}):\n${diasFormatados}`;
@@ -170,7 +170,13 @@ Quando o paciente escolher o horário, faça esta pergunta:
   // Regra de nome completo — injetada no bloco de identificação
   const regraNomeCompleto = `\nRegra de nome completo: qualquer nome com pelo menos duas palavras (ex: "Silvano Alves", "João Silva") é considerado nome completo. Não peça mais informações nem confirmação adicional — registre nome_paciente e EXECUTE acao: "criar_agendamento" no MESMO turno, exibindo a confirmação ✅.
 
-PROIBIDO ao perguntar o nome do paciente: NÃO repita a lista de horários (linhas com 📅) na mesma mensagem. O paciente já escolheu o horário no turno anterior — incluir o calendário aqui é redundante e confunde. A pergunta do nome deve ser uma mensagem curta e isolada.`;
+PROIBIDO ao perguntar o nome do paciente: NÃO repita a lista de horários (linhas com data e horários separados por "|") na mesma mensagem. O paciente já escolheu o horário no turno anterior — incluir o calendário aqui é redundante e confunde. A pergunta do nome deve ser uma mensagem curta e isolada.
+
+FORMATAÇÃO OBRIGATÓRIA ao transcrever os HORÁRIOS DISPONÍVEIS para o paciente:
+- Preserve EXATAMENTE as quebras de linha do bloco acima. Nunca junte data e horários na mesma linha.
+- Após os dois pontos do texto introdutório (ex: "está disponível nos seguintes horários:"), insira UMA linha em branco antes do primeiro dia.
+- Entre cada dia (cada "*DiaSemana, DD/MM/AAAA:*") insira UMA linha em branco.
+- Não inclua emoji de calendário (📅) antes das datas — escreva apenas o cabeçalho em negrito conforme o formato acima.`;
 
   const mensagemBoasVindas = clinica.configJson?.mensagem_boas_vindas;
   const telefoneFallback = clinica.configJson?.telefone_fallback;

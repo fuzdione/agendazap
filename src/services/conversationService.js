@@ -324,19 +324,19 @@ async function getAvailableSlots(clinicaId, profissionais) {
 }
 
 /**
- * Remove blocos de listagem de horários (linhas começando com 📅 + a linha de slots
- * imediatamente seguinte) que o LLM tenha incluído por reflexo. Usado quando o
- * paciente já escolheu horário (data_hora preenchido) e a próxima pergunta é o
- * nome — calendário ali confunde e suja a mensagem.
+ * Remove blocos de listagem de horários (linha com data "DD/MM/AAAA:" + a linha
+ * de slots imediatamente seguinte) que o LLM tenha incluído por reflexo. Usado
+ * quando o paciente já escolheu horário (data_hora preenchido) e a próxima
+ * pergunta é o nome — calendário ali confunde e suja a mensagem.
  * @param {string} text
  * @returns {string}
  */
 function removerListagemHorarios(text) {
   if (!text) return text;
-  // Linha "📅 ...:" seguida de uma linha de slots; consome opcionalmente uma
-  // linha em branco depois. Repetições agrupadas para limpar múltiplos dias.
+  // Linha com data DD/MM/AAAA seguida de uma linha contendo HH:MM (slots).
+  // Aceita opcionalmente 📅 no início (legado) e/ou asteriscos de negrito.
   return text
-    .replace(/(?:📅[^\n]*\n[^\n]*\n?\n?)+/g, '')
+    .replace(/(?:[^\n]*\d{2}\/\d{2}\/\d{4}[^\n]*\n[^\n]*\d{1,2}:\d{2}[^\n]*\n?\n?)+/g, '')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
@@ -358,7 +358,7 @@ function formatarSlotsParaMensagem(horariosDisponiveis, profissionalId) {
     .slice(0, 3)
     .map((d) => {
       const [ano, mes, dia] = d.data.split('-');
-      return `📅 ${d.dia_semana}, ${dia}/${mes}/${ano}:\n${d.slots.slice(0, 8).join(' | ')}`;
+      return `*${d.dia_semana}, ${dia}/${mes}/${ano}:*\n${d.slots.slice(0, 8).join(' | ')}`;
     })
     .join('\n\n');
 }
@@ -1131,7 +1131,7 @@ export async function handleIncomingMessage(clinicaId, telefone, mensagemTexto, 
     controle.novo_estado === 'escolhendo_horario' &&
     contextoAtualizado.profissional_id &&
     !contextoAtualizado.data_hora &&
-    !respostaFinal.includes('📅')
+    !/\d{2}\/\d{2}\/\d{4}\s*:/.test(respostaFinal)
   ) {
     const slotsFormatados = formatarSlotsParaMensagem(horariosDisponiveis, contextoAtualizado.profissional_id);
     respostaFinal = `${respostaFinal}\n\n${slotsFormatados}`;
