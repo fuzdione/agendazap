@@ -104,9 +104,9 @@ export function buildSystemPrompt(clinica, profissionais, horariosDisponiveis, e
     .join('\n');
 
   // Formata os horários disponíveis por profissional
-  // Limite: 3 dias e 8 horários por dia (WhatsApp-friendly, formato horizontal)
+  // Limite: 3 dias; todos os slots do dia são exibidos (sem truncamento)
   const MAX_DIAS = 3;
-  const MAX_SLOTS_POR_DIA = 8;
+  const MAX_SLOTS_POR_DIA = 20;
 
   // Horários só dos profissionais visíveis (alinhado com o filtro acima).
   const horariosVisiveis = horariosDisponiveis.filter((h) =>
@@ -121,8 +121,7 @@ export function buildSystemPrompt(clinica, profissionais, horariosDisponiveis, e
         const [ano, mes, dia] = d.data.split('-');
         const dataFormatada = `${dia}/${mes}/${ano}`;  // ano obrigatório para Claude gerar ISO correto
         const primeiros = d.slots.slice(0, MAX_SLOTS_POR_DIA);
-        const extra = d.slots.length - primeiros.length;
-        const linhaSlots = primeiros.join(' | ') + (extra > 0 ? ` (+${extra} horários)` : '');
+        const linhaSlots = primeiros.join(' | ');
         return `*${d.dia_semana}, ${dataFormatada}:*\n${linhaSlots}`;
       }).join('\n\n');
 
