@@ -28,6 +28,13 @@ npm install --silent
 npm run build
 cd ..
 
+echo "==> Build do painel do proprietário (React/Vite)..."
+cd owner-panel
+rm -rf node_modules package-lock.json
+npm install --silent
+npm run build
+cd ..
+
 echo "==> Build das imagens da aplicação..."
 docker compose -f docker-compose.prod.yml build app migrate
 
