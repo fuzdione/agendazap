@@ -1,11 +1,12 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { QrCode, Plus, Check, RefreshCw } from 'lucide-react';
+import { QrCode, Plus, Check, RefreshCw, LogOut, Trash2 } from 'lucide-react';
 import { api } from '../services/api.js';
 import { useToast } from '../context/ToastContext.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import LoadingSpinner from '../components/LoadingSpinner.jsx';
 import EmptyState from '../components/EmptyState.jsx';
+import ConfirmDialog from '../components/ConfirmDialog.jsx';
 import { Smartphone } from 'lucide-react';
 
 // ── Modal QR Code ─────────────────────────────────────────────────
@@ -106,6 +107,8 @@ export default function Instancias() {
   const [loading, setLoading] = useState(true);
   const [modalQR, setModalQR] = useState(null); // instância selecionada
   const [criando, setCriando] = useState(null); // clinicaId
+  const [confirm, setConfirm] = useState(null); // { type: 'logout'|'deletar', inst }
+  const [executando, setExecutando] = useState(null); // clinicaId em operação
 
   const carregar = useCallback(async () => {
     setLoading(true);
@@ -130,6 +133,25 @@ export default function Instancias() {
       if (item && item.status !== 'conectado') setModalQR(item);
     }
   }, [clinicaIdFoco, instancias]);
+
+  async function handleConfirmar() {
+    if (!confirm) return;
+    const { type, inst } = confirm;
+    setConfirm(null);
+    setExecutando(inst.clinicaId);
+    try {
+      await api.delete(`/owner/instancias/${inst.clinicaId}/${type}`);
+      addToast(
+        type === 'logout' ? 'WhatsApp desconectado com sucesso.' : 'Instância removida com sucesso.',
+        'success',
+      );
+      await carregar();
+    } catch (err) {
+      addToast(err.response?.data?.error ?? 'Erro ao executar operação.', 'error');
+    } finally {
+      setExecutando(null);
+    }
+  }
 
   async function handleCriarInstancia(clinicaId) {
     setCriando(clinicaId);
@@ -195,16 +217,33 @@ export default function Instancias() {
                         </button>
                       )}
                       {inst.status === 'desconectado' && (
-                        <button
-                          onClick={() => setModalQR(inst)}
-                          className="flex items-center gap-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors"
-                        >
-                          <QrCode size={13} />
-                          Ver QR Code
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setModalQR(inst)}
+                            className="flex items-center gap-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors"
+                          >
+                            <QrCode size={13} />
+                            Ver QR Code
+                          </button>
+                          <button
+                            onClick={() => setConfirm({ type: 'deletar', inst })}
+                            disabled={executando === inst.clinicaId}
+                            className="flex items-center gap-1.5 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 disabled:opacity-60 px-3 py-1.5 rounded-lg transition-colors"
+                          >
+                            <Trash2 size={13} />
+                            {executando === inst.clinicaId ? 'Aguarde...' : 'Deletar'}
+                          </button>
+                        </div>
                       )}
                       {inst.status === 'conectado' && (
-                        <span className="text-xs text-emerald-600 font-medium">Conectado</span>
+                        <button
+                          onClick={() => setConfirm({ type: 'logout', inst })}
+                          disabled={executando === inst.clinicaId}
+                          className="flex items-center gap-1.5 text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 disabled:opacity-60 px-3 py-1.5 rounded-lg transition-colors"
+                        >
+                          <LogOut size={13} />
+                          {executando === inst.clinicaId ? 'Aguarde...' : 'Desconectar'}
+                        </button>
                       )}
                       {inst.status === 'inativa' && (
                         <span className="text-xs text-slate-400">Clínica inativa</span>
@@ -225,6 +264,20 @@ export default function Instancias() {
           onConectado={carregar}
         />
       )}
+
+      <ConfirmDialog
+        open={!!confirm}
+        title={confirm?.type === 'logout' ? 'Desconectar WhatsApp?' : 'Deletar instância?'}
+        message={
+          confirm?.type === 'logout'
+            ? `O WhatsApp de "${confirm?.inst?.nome}" será desconectado. Será necessário escanear o QR code novamente para reconectar.`
+            : `A instância de "${confirm?.inst?.nome}" será removida permanentemente da Evolution API. Esta ação não pode ser desfeita.`
+        }
+        confirmLabel={confirm?.type === 'logout' ? 'Desconectar' : 'Deletar'}
+        danger={confirm?.type === 'deletar'}
+        onConfirm={handleConfirmar}
+        onCancel={() => setConfirm(null)}
+      />
     </div>
   );
 }

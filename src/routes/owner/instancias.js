@@ -4,6 +4,8 @@ import {
   createInstance,
   getQRCode,
   getInstanceStatus,
+  logoutInstance,
+  deleteInstance,
 } from '../../services/whatsappService.js';
 
 /**
@@ -91,6 +93,51 @@ export async function ownerInstanciasRoutes(fastify) {
       return reply.send({ success: true, data });
     } catch (err) {
       request.log.error({ msg: 'Erro ao criar instância (owner)', error: err.message });
+      return reply.status(500).send({ success: false, error: err.message });
+    }
+  });
+
+  /**
+   * Desconecta o WhatsApp de uma instância (logout). A instância continua existindo
+   * na Evolution API, mas precisará de novo QR code para reconectar.
+   */
+  fastify.delete('/owner/instancias/:clinicaId/logout', {
+    preHandler: [fastify.authenticateOwner],
+  }, async (request, reply) => {
+    const { clinicaId } = request.params;
+
+    const clinica = await prisma.clinica.findUnique({ where: { id: clinicaId } });
+    if (!clinica) {
+      return reply.status(404).send({ success: false, error: 'Clínica não encontrada' });
+    }
+
+    try {
+      const data = await logoutInstance(clinica.telefoneWpp);
+      return reply.send({ success: true, data });
+    } catch (err) {
+      request.log.error({ msg: 'Erro ao desconectar instância (owner)', error: err.message });
+      return reply.status(500).send({ success: false, error: err.message });
+    }
+  });
+
+  /**
+   * Remove permanentemente a instância da Evolution API.
+   */
+  fastify.delete('/owner/instancias/:clinicaId/deletar', {
+    preHandler: [fastify.authenticateOwner],
+  }, async (request, reply) => {
+    const { clinicaId } = request.params;
+
+    const clinica = await prisma.clinica.findUnique({ where: { id: clinicaId } });
+    if (!clinica) {
+      return reply.status(404).send({ success: false, error: 'Clínica não encontrada' });
+    }
+
+    try {
+      const data = await deleteInstance(clinica.telefoneWpp);
+      return reply.send({ success: true, data });
+    } catch (err) {
+      request.log.error({ msg: 'Erro ao deletar instância (owner)', error: err.message });
       return reply.status(500).send({ success: false, error: err.message });
     }
   });

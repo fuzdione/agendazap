@@ -122,3 +122,24 @@ export async function sendTextMessage(instanceName, phoneOrJid, text) {
 export async function getInstanceStatus(instanceName) {
   return request('GET', `/instance/connectionState/${instanceName}`);
 }
+
+/**
+ * Desconecta o WhatsApp de uma instância (logout), mantendo a instância criada.
+ * Após o logout será necessário escanear o QR code novamente para reconectar.
+ *
+ * @param {string} instanceName
+ */
+export async function logoutInstance(instanceName) {
+  console.log(`🔌 Desconectando instância: ${instanceName}`);
+  return request('DELETE', `/instance/logout/${instanceName}`);
+}
+
+/**
+ * Remove permanentemente uma instância da Evolution API.
+ *
+ * @param {string} instanceName
+ */
+export async function deleteInstance(instanceName) {
+  console.log(`🗑️ Deletando instância: ${instanceName}`);
+  return request('DELETE', `/instance/delete/${instanceName}`);
+}
