@@ -145,9 +145,16 @@ export default function Instancias() {
         type === 'logout' ? 'WhatsApp desconectado com sucesso.' : 'Instância removida com sucesso.',
         'success',
       );
-      // Aguarda a Evolution API propagar o novo estado antes de recarregar
-      if (type === 'logout') await new Promise((r) => setTimeout(r, 3000));
-      await carregar();
+      // Atualiza o estado local imediatamente sem depender do tempo da Evolution API
+      if (type === 'logout') {
+        setInstancias((prev) =>
+          prev.map((i) => i.clinicaId === inst.clinicaId ? { ...i, status: 'desconectado' } : i)
+        );
+      } else {
+        setInstancias((prev) =>
+          prev.map((i) => i.clinicaId === inst.clinicaId ? { ...i, status: 'sem_instancia' } : i)
+        );
+      }
     } catch (err) {
       addToast(err.response?.data?.error ?? 'Erro ao executar operação.', 'error');
     } finally {
